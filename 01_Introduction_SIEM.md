@@ -370,8 +370,7 @@ Au cours de ce module, vous apprendrez à :
 - Collecter et analyser les événements de sécurité
 - Créer des visualisations et des dashboards
 - Détecter et analyser les menaces
-
-
+  
 ---
 
 *Document créé pour l'UE S10-3 - Sécurité des informations et management des événements*  
