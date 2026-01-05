@@ -45,7 +45,7 @@ Vous allez :
 #### Machine serveur ELK
 - **OS** : Debian 13 (Bookworm)
 - **CPU** : 1 cœur
-- **RAM** : 1 Go
+- **RAM** : 2 Go
 - **Réseau** : Accessible depuis le réseau ESAIP
 - **Accès** : SSH depuis votre PC
 
@@ -182,22 +182,17 @@ sudo apt-get update && sudo apt-get install elasticsearch
 
 **IMPORTANT** : Avec seulement 1 Go de RAM, nous devons limiter la mémoire heap d'Elasticsearch.
 
-Éditez le fichier de configuration JVM :
+créez le fichier de configuration de la mémoir heap pour la JVM :
 
 ```bash
-sudo nano /etc/elasticsearch/jvm.options
+sudo nano /etc/elasticsearch/jvm.options.d/heapsizemem.conf
 ```
 
-Modifiez les lignes suivantes (recherchez `-Xms` et `-Xmx`) :
-
-```properties
-# Avant (par défaut)
-# -Xms1g
-# -Xmx1g
-
-# Après (optimisé pour 1 Go RAM)
--Xms256m
--Xmx256m
+Insérez les lignes suivantes :
+```
+# Après (optimisé pour 2 Go RAM)
+-Xms1G
+-Xmx1G
 ```
 
 **Explication** : Nous limitons le heap à 256 Mo pour laisser de la mémoire au système et aux autres services.
