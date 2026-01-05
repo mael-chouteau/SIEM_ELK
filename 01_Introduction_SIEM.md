@@ -63,20 +63,20 @@ Un SIEM moderne comprend généralement :
 
 À l'issue de ce cours, vous serez capable de :
 
-- ✅ **Mettre en place une solution SIEM** complète
-- ✅ **Centraliser et gérer les journaux** en provenance des IDS/IPS et équipements d'exploitation
-- ✅ **Détecter les menaces** parmi un grand volume d'information
-- ✅ **Créer des visualisations** avec les données chargées à l'aide de Kibana
-- ✅ **Analyser les données en temps réel** avec la pile ELK
+-  **Mettre en place une solution SIEM** complète
+-  **Centraliser et gérer les journaux** en provenance des IDS/IPS et équipements d'exploitation
+-  **Détecter les menaces** parmi un grand volume d'information
+-  **Créer des visualisations** avec les données chargées à l'aide de Kibana
+-  **Analyser les données en temps réel** avec la pile ELK
 
 ### 3.2 Objectifs en matière de connaissances
 
 Vous connaîtrez :
 
-- 📚 Les **caractéristiques clés des SIEM** et les solutions du marché
-- 📚 Les **technologies défensives** autour de la terminologie SIEM
-- 📚 Le **fonctionnement d'une solution SIEM** et ses avantages
-- 📚 Les **principes fondamentaux de la pile ELK** et les cas d'utilisation
+-  Les **caractéristiques clés des SIEM** et les solutions du marché
+-  Les **technologies défensives** autour de la terminologie SIEM
+-  Le **fonctionnement d'une solution SIEM** et ses avantages
+-  Les **principes fondamentaux de la pile ELK** et les cas d'utilisation
 
 ---
 
