@@ -139,12 +139,13 @@ sudo apt upgrade -y
 Installez les outils nécessaires :
 
 ```bash
-sudo apt install -y curl wget nano vim git
+sudo apt install -y curl wget nano git
 ```
 
 ---
 
 ### 2.2 Installation d'Elasticsearch
+En cas de problème avec l'installation veuillez vérifier si la procédure n'a pas changée sur [elastic doc](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-with-debian-package)
 
 #### Étape 1 : Ajout de la clé GPG Elastic
 
