@@ -1373,7 +1373,7 @@ cluster.name: siem-cluster
 node.name: siem-node-1
 cluster.initial_master_nodes: ["siem-node-1"]
 
-# Désactiver la sécurité pour simplifier (⚠️ à ne pas faire en production)
+# Désactiver la sécurité pour simplifier ( à ne pas faire en production)
 xpack.security.enabled: false
 
 # Désactiver SSL/HTTPS (nécessaire quand la sécurité est désactivée)
