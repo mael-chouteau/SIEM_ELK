@@ -194,16 +194,16 @@ sudo nano /etc/elasticsearch/jvm.options.d/heapsizemem.options
 Insérez les lignes suivantes :
 
 ```properties
-# Optimisé pour 2 Go RAM (heap limité à 1 Go)
--Xms1g
--Xmx1g
+# Optimisé pour 2 Go RAM (heap limité à 512 Mo)
+-Xms512m
+-Xmx512m
 ```
 
 **Explication** : 
 - Nous limitons le **heap** à 1 Go pour laisser suffisamment de mémoire au système et aux autres services (Kibana, Logstash, etc.).
-- Avec 2 Go de RAM total, un heap de 1 Go est un bon compromis.
-- **Important** : La mémoire totale utilisée par Elasticsearch sera supérieure au heap (environ 1.4-1.5 Go) car elle inclut :
-  - Le heap JVM (1 Go dans notre cas)
+- Avec 2 Go de RAM total, un heap de 512m est un bon compromis.
+- **Important** : La mémoire totale utilisée par Elasticsearch sera supérieure au heap (environ 1Go) car elle inclut :
+  - Le heap JVM ( 512m dans notre cas)
   - La mémoire native (off-heap)
   - Les bibliothèques partagées
   - Les processus auxiliaires (comme le controller ML)
@@ -232,10 +232,7 @@ cluster.name: siem-cluster
 
 node.name: siem-node-1
 
-# Désactiver la sécurité pour simplifier (**à ne pas faire en production**)
-xpack.security.enabled: false
-
-# Désactiver SSL/HTTPS pour simplifier (nécessaire car la sécurité est désactivée)
+# Désactiver SSL/HTTPS pour simplifier (nécessaire car la sécurité est désactivée)(**à ne pas faire en production**)
 # Enable security features
 xpack.security.enabled: false
 
@@ -350,9 +347,6 @@ server.port: 5601
 
 # URL d'Elasticsearch
 elasticsearch.hosts: ["http://localhost:9200"]
-
-# Désactiver la sécurité ( **à ne pas faire en production**)
-xpack.security.enabled: false
 ```
 
 #### Étape 3 : Démarrage de Kibana
@@ -689,7 +683,17 @@ Documentation officielle : [grok](https://www.elastic.co/guide/en/logstash/curre
 
 ### 3.1 Installation et configuration de Filebeat
 
-#### Étape 1 : Installation de Filebeat
+#### Étape 1 : Installation de Filebeat et rsyslog
+
+Depuis debian 8 journald est utilisé pour logger les évènements système ce qui rend la capture par filebeat ou logstash impossible.
+Il faut donc réactiver rsyslog comme la configuration par défaut de ubuntu.
+
+Installez et activez rsyslog
+
+```bash
+apt install rsyslog
+systemctl enable --now rsyslog
+```
 
 Installez Filebeat sur la VM Debian :
 
@@ -1365,88 +1369,7 @@ cd "C:\Program Files\Winlogbeat"
 .\winlogbeat.exe test config -c .\winlogbeat.yml
 ```
 
-### 6.2 Fichiers de configuration de référence
-
-#### Elasticsearch - `/etc/elasticsearch/elasticsearch.yml` (version 9.2)
-
-```yaml
-# Configuration réseau (Elasticsearch 9.2 utilise http.host au lieu de network.host)
-http.host: 0.0.0.0
-http.port: 9200
-
-# Configuration du cluster
-cluster.name: siem-cluster
-node.name: siem-node-1
-cluster.initial_master_nodes: ["siem-node-1"]
-
-# Désactiver la sécurité pour simplifier ( à ne pas faire en production)
-xpack.security.enabled: false
-
-# Désactiver SSL/HTTPS (nécessaire quand la sécurité est désactivée)
-# Ces lignes désactivent les certificats SSL générés automatiquement
-xpack.security.http.ssl.enabled: false
-xpack.security.transport.ssl.enabled: false
-```
-
-**Note** : 
-- Remplacez `"siem-node-1"` dans `cluster.initial_master_nodes` par la valeur de `node.name` que vous utilisez (ou le nom de votre machine par défaut comme `"tp-prof"`).
-- Si vous gardez le nom de machine par défaut, utilisez ce nom dans `cluster.initial_master_nodes`.
-
-#### Elasticsearch - Configuration JVM - `/etc/elasticsearch/jvm.options.d/heapsizemem.options`
-
-```properties
-# Optimisé pour 2 Go RAM
--Xms1g
--Xmx1g
-```
-
-**Note** : 
-- Ce fichier doit être créé dans le répertoire `jvm.options.d/` pour surcharger les paramètres par défaut.
-- **Important** : L'extension du fichier doit être `.options` (pas `.conf`) pour être prise en compte par Elasticsearch.
-- La mémoire totale utilisée par Elasticsearch sera supérieure au heap (environ 1.4-1.5 Go avec un heap de 1 Go) car elle inclut la mémoire native et les processus auxiliaires.
-
-#### Kibana - `/etc/kibana/kibana.yml`
-
-```yaml
-server.host: "0.0.0.0"
-server.port: 5601
-elasticsearch.hosts: ["http://localhost:9200"]
-xpack.security.enabled: false
-```
-
-#### Filebeat - `/etc/filebeat/filebeat.yml` (extrait)
-
-```yaml
-filebeat.inputs:
-  - type: log
-    enabled: true
-    paths:
-      - /var/log/*.log
-
-output.elasticsearch:
-  hosts: ["localhost:9200"]
-```
-
-#### Winlogbeat - `winlogbeat.yml` (extrait)
-
-```yaml
-winlogbeat.event_logs:
-  - name: Security
-    processors:
-      - drop_event:
-          when:
-            not:
-              or:
-                - equals:
-                    winlog.event_id: 4624
-                - equals:
-                    winlog.event_id: 4625
-
-output.elasticsearch:
-  hosts: ["http://IP_VM:9200"]
-```
-
-### 6.3 Dépannage
+### 6.2 Dépannage
 
 #### Problème : Elasticsearch ne démarre pas
 
@@ -1551,42 +1474,18 @@ output.elasticsearch:
 3. Vérifiez la configuration : `.\winlogbeat.exe test config`
 4. Vérifiez la connectivité vers Elasticsearch : `Test-NetConnection -ComputerName IP_VM -Port 9200`
 
-#### Problème : Elasticsearch utilise plus de mémoire que le heap configuré
-
-**Symptôme** : `systemctl status elasticsearch` montre que Elasticsearch utilise plus de mémoire (ex: 1.4G) que le heap configuré (ex: 1G dans `heapsizemem.options`).
-
-**Explication** : C'est **normal** ! La mémoire totale d'Elasticsearch inclut :
-- Le **heap JVM** (configuré avec `-Xmx1g` dans votre fichier)
-- La **mémoire native (off-heap)** pour les buffers, caches, mappings, etc. (~200-400 Mo)
-- Les **bibliothèques partagées** chargées en mémoire
-- Les **processus auxiliaires** (comme le controller ML qu'on voit dans le status)
-- Les **buffers système** du kernel
-
-**Vérification du heap réel** : Pour voir le heap JVM réellement utilisé (pas la mémoire totale) :
-```bash
-curl http://localhost:9200/_nodes/jvm?pretty | grep -A 10 "heap"
-```
-
-Vous devriez voir `heap_max_in_bytes` proche de 1G (1073741824 bytes) et `heap_used_in_bytes` inférieur.
-
-**Si la mémoire totale est vraiment trop élevée** :
-1. Vérifiez que le fichier s'appelle bien `heapsizemem.options` (pas `.conf`)
-2. Redémarrez Elasticsearch : `sudo systemctl restart elasticsearch`
-3. Réduisez le heap à 512m si nécessaire
-4. Désactivez ML (Machine Learning) si non utilisé : `xpack.ml.enabled: false` dans `elasticsearch.yml`
-
 #### Problème : Performance lente avec 2 Go de RAM
 
 **Symptômes** : Système lent, services qui plantent
 
 **Solutions** :
-1. Réduisez le heap d'Elasticsearch (512m ou 1g selon les autres services)
+1. Réduisez le heap d'Elasticsearch (256m selon les autres services)
 2. Limitez le nombre d'indices
 3. Désactivez les fonctionnalités non essentielles (ML, etc.)
 4. Utilisez un swap si nécessaire (mais cela ralentit)
 5. Vérifiez la consommation mémoire des autres services (Kibana, Logstash)
 
-### 6.4 Ressources supplémentaires
+### 6.3 Ressources supplémentaires
 
 #### Documentation officielle
 
