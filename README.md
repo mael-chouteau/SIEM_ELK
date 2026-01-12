@@ -152,7 +152,8 @@ En cas de problème avec l'installation veuillez vérifier si la procédure n'a 
 Ajoutez la clé GPG pour authentifier les paquets Elastic :
 
 ```bash
-wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch
+sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
 ```
 
 #### Étape 2 : Installation d'apt-transport-https
