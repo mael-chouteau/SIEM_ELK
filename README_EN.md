@@ -504,6 +504,21 @@ sudo mkdir -p /var/log/logstash /var/lib/logstash
 sudo chown -R logstash:logstash /var/log/logstash /var/lib/logstash
 
 ```
+**IMPORTANT**: With 4 GB of RAM, we must limit the Elasticsearch heap memory to leave memory for other services.
+
+Edit the heap memory configuration file for the JVM:
+
+```bash
+sudo nano /etc/logstash/jvm.options
+```
+Modify the following lines:
+
+```properties
+# Optimized for 4 GB RAM (heap limited to 256 MB)
+-Xms256m
+-Xmx256m
+
+```
 
 ---
 
