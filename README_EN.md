@@ -191,9 +191,9 @@ sudo apt-get update && sudo apt-get install elasticsearch
 
 ```
 
-#### Step 5: Configure Elasticsearch for 2 GB of RAM
+#### Step 5: Configure Elasticsearch for 4 GB of RAM
 
-**IMPORTANT**: With 2 GB of RAM, we must limit the Elasticsearch heap memory to leave memory for other services.
+**IMPORTANT**: With 4 GB of RAM, we must limit the Elasticsearch heap memory to leave memory for other services.
 
 Create the heap memory configuration file for the JVM:
 
@@ -207,7 +207,7 @@ sudo nano /etc/elasticsearch/jvm.options.d/heapsizemem.options
 Insert the following lines:
 
 ```properties
-# Optimized for 2 GB RAM (heap limited to 512 MB)
+# Optimized for 4 GB RAM (heap limited to 512 MB)
 -Xms512m
 -Xmx512m
 
@@ -215,8 +215,8 @@ Insert the following lines:
 
 **Explanation**:
 
-* We limit the **heap** to 1 GB to leave enough memory for the system and other services (Kibana, Logstash, etc.).
-* With a total of 2 GB of RAM, a 512m heap is a good compromise.
+* We limit the **heap** to 512 MB to leave enough memory for the system and other services (Kibana, Logstash, etc.).
+* With a total of 4 GB of RAM, a 512m heap is a good compromise.
 * **Important**: The total memory used by Elasticsearch will be greater than the heap (approximately 1 GB) because it includes:
 * The JVM heap (512m in our case)
 * Native memory (off-heap)
@@ -379,11 +379,12 @@ server.port: 5601
 # Elasticsearch URL
 elasticsearch.hosts: ["http://localhost:9200"]
 ```
-Edit the node.option file
 
-Uncomment --max-old-space-size=4096
+Edit the node.option file:
 
-And change it to --max-old-space-size=256
+**Uncomment --max-old-space-size=4096**
+
+**And change it to --max-old-space-size=512**
 
 
 #### Step 3: Start Kibana
