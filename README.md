@@ -846,6 +846,8 @@ Installez Winlogbeat comme service Windows :
 
 ```powershell
 # Dans PowerShell (en tant qu'administrateur)
+set-executionpolicy remotesigned
+#tapez o pour valider puis
 cd "C:\Program Files\Winlogbeat"
 .\install-service-winlogbeat.ps1
 ```
