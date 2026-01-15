@@ -348,6 +348,7 @@ server.port: 5601
 
 # URL d'Elasticsearch
 elasticsearch.hosts: ["http://localhost:9200"]
+node.options: "--max-old-space-size=128"
 ```
 
 #### Étape 3 : Démarrage de Kibana
