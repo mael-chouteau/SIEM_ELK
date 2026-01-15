@@ -940,6 +940,8 @@ Install Winlogbeat as a Windows service:
 
 ```powershell
 # In PowerShell (as administrator)
+set-executionpolicy remotesigned
+#type o to validate
 cd "C:\Program Files\Winlogbeat"
 .\install-service-winlogbeat.ps1
 
