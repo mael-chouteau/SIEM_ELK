@@ -1539,8 +1539,6 @@ Avant de terminer, vérifiez que vous avez :
 - [ ] Metricbeat collectant les métriques système
 - [ ] Au moins 3 visualisations créées dans Kibana
 - [ ] Un dashboard fonctionnel
-- [ ] Documenté vos configurations et découvertes
-
 ---
 
 ## Conclusion
