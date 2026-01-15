@@ -1708,8 +1708,6 @@ Before finishing, verify that you have:
 * [ ] Metricbeat collecting system metrics
 * [ ] At least 3 visualizations created in Kibana
 * [ ] A functional dashboard
-* [ ] Documented your configurations and discoveries
-
 ---
 
 ## Conclusion
