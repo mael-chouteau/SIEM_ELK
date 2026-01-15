@@ -44,8 +44,8 @@ Vous allez :
 
 #### Machine serveur ELK
 - **OS** : Debian 13 (Bookworm)
-- **CPU** : 1 cœur
-- **RAM** : 2 Go
+- **CPU** : 2 cœur
+- **RAM** : 4 Go
 - **Réseau** : Accessible depuis le réseau ESAIP
 - **Accès** : SSH depuis votre PC
 
@@ -123,7 +123,7 @@ free -h
 df -h
 ```
 
-**Vérification** : Notez la quantité de RAM disponible. Avec 2 Go de RAM, nous devrons optimiser Elasticsearch pour laisser de la mémoire aux autres services.
+**Vérification** : Notez la quantité de RAM disponible. Avec 4 Go de RAM, nous devrons optimiser Elasticsearch pour laisser de la mémoire aux autres services.
 
 #### Étape 3 : Mise à jour du système
 
@@ -180,9 +180,9 @@ Mettez à jour les dépôts et installez Elasticsearch :
 sudo apt-get update && sudo apt-get install elasticsearch
 ```
 
-#### Étape 5 : Configuration d'Elasticsearch pour 2 Go de RAM
+#### Étape 5 : Configuration d'Elasticsearch pour 4 Go de RAM
 
-**IMPORTANT** : Avec 2 Go de RAM, nous devons limiter la mémoire heap d'Elasticsearch pour laisser de la mémoire aux autres services.
+**IMPORTANT** : Avec 4 Go de RAM, nous devons limiter la mémoire heap d'Elasticsearch pour laisser de la mémoire aux autres services.
 
 Créez le fichier de configuration de la mémoire heap pour la JVM :
 
@@ -195,14 +195,14 @@ sudo nano /etc/elasticsearch/jvm.options.d/heapsizemem.options
 Insérez les lignes suivantes :
 
 ```properties
-# Optimisé pour 2 Go RAM (heap limité à 512 Mo)
+# Optimisé pour 4 Go RAM (heap limité à 512 Mo)
 -Xms512m
 -Xmx512m
 ```
 
 **Explication** : 
-- Nous limitons le **heap** à 1 Go pour laisser suffisamment de mémoire au système et aux autres services (Kibana, Logstash, etc.).
-- Avec 2 Go de RAM total, un heap de 512m est un bon compromis.
+- Nous limitons le **heap** à 512 Mo pour laisser suffisamment de mémoire au système et aux autres services (Kibana, Logstash, etc.).
+- Avec 4 Go de RAM total, un heap de 512m est un bon compromis.
 - **Important** : La mémoire totale utilisée par Elasticsearch sera supérieure au heap (environ 1Go) car elle inclut :
   - Le heap JVM ( 512m dans notre cas)
   - La mémoire native (off-heap)
@@ -305,18 +305,6 @@ curl http://IP_VM:9200
 
 **Vérification** : Si vous obtenez une réponse JSON, Elasticsearch fonctionne correctement.
 
-#### Aide : Résolution d'un problème de mémoire
-
-**Situation** : Elasticsearch ne démarre pas ou plante avec une erreur de mémoire.
-
-**Procédure** :
-1. Vérifiez les logs : `sudo journalctl -u elasticsearch -n 50`
-2. Identifiez l'erreur liée à la mémoire
-3. Ajustez les paramètres `-Xms` et `-Xmx` dans `/etc/elasticsearch/jvm.options`
-4. Redémarrez Elasticsearch : `sudo systemctl restart elasticsearch`
-
-**Indice** : Avec 2 Go de RAM, un heap de 1 Go devrait fonctionner. Si vous avez des problèmes, vous pouvez réduire à 512m, mais cela peut impacter les performances.
-
 ---
 
 ### 2.3 Installation de Kibana
@@ -348,8 +336,12 @@ server.port: 5601
 
 # URL d'Elasticsearch
 elasticsearch.hosts: ["http://localhost:9200"]
-node.options: "--max-old-space-size=128"
 ```
+Édite le fichier node.options:
+
+**Décommente --max-old-space-size=4096**
+
+**Et change le pour --max-old-space-size=512**
 
 #### Étape 3 : Démarrage de Kibana
 
@@ -468,7 +460,7 @@ sudo nano /etc/logstash/jvm.options
 
 Modifiez les lignes suivantes :
 
-```properties
+```bash
 # Optimisé pour 4 Go RAM (heap limité à 256 Mo)
 -Xms256m
 -Xmx256m
