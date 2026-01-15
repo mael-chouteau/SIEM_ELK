@@ -378,9 +378,11 @@ server.port: 5601
 
 # Elasticsearch URL
 elasticsearch.hosts: ["http://localhost:9200"]
-node.options: "--max-old-space-size=128"
-
 ```
+Edit the node.option file
+Uncomment --max-old-space-size=4096
+And change it to --max-old-space-size=128
+
 
 #### Step 3: Start Kibana
 
