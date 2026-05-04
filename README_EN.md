@@ -45,8 +45,8 @@ Upon completion of this TP, you will be able to:
 #### ELK Server Machine
 
 * **OS**: Debian 13 (Bookworm)
-* **CPU**: 1 core
-* **RAM**: 2 GB
+* **CPU**: 2 core
+* **RAM**: 4 GB
 * **Network**: Accessible from the ESAIP network
 * **Access**: SSH from your PC
 
