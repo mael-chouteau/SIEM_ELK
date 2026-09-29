@@ -1721,9 +1721,3 @@ Congratulations! You now have a complete, operational SIEM solution. You can:
 * Store and index data in Elasticsearch
 * Visualize and analyze data in Kibana
 * Detect suspicious activity
-
-**Good work!**
-
----
-
-*TP created for UE S10-3 - Information Security and Event Management* *ESAIP School - Computer and Networks Engineering*
