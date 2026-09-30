@@ -1238,11 +1238,12 @@ In the instructor lab these objects already exist in Kibana (**Analytics → Das
 | **Dashboard SIEM — Suricata** | `/app/dashboards#/view/dash-siem-suricata` | Suricata alerts | `event.kind: "alert"` |
 | **Dashboard SIEM — Métriques hôte** (host metrics) | `/app/dashboards#/view/dash-siem-metrics` | Metricbeat (CPU, memory, load, network, disk, processes, sockets) | `event.dataset: system.cpu` / `system.network`… |
 | **Dashboard SIEM Lab Windows** | `/app/dashboards#/view/dash-siem-lab-windows` | Winlogbeat (Security / System / Application) | `winlog.event_id: 4624` / `4625` |
+| **Dashboard SIEM — GeoIP** | `/app/dashboards#/view/dash-siem-geoip` | Suricata (source and destination GeoIP) | `destination.geo.country_name: *` / `source.geo.country_name: *` |
 
 Linux saved searches: `Lab — Alertes Suricata`, `Lab — Connexions SSH / auth`, `Lab — Apache access`, `Lab — Métriques hôte`.  
 Windows saved searches: `Lab — Connexions Windows réussies (4624)`, `Lab — Échecs de connexion Windows (4625)`, `Lab — Journal Security Windows`, `Lab — Canaux Windows (Security/System/Application)`.
 
-**Métriques hôte** (`dash-siem-metrics`) shows Metricbeat time series: CPU (`system.cpu.*.norm.pct`), memory (`system.memory.actual.used.pct`), load 1/5/15, inbound and outbound bytes/s per interface (`system.network.in/out.bytes`, derivative), disk use per mount (`system.filesystem.used.pct`), top processes and sockets. NDJSON import: `instructor/kibana/dashboards-metrics.ndjson` (in addition to the Linux and Windows files).
+**Métriques hôte** (`dash-siem-metrics`, default window: 24 hours) mixes several Lens widget types on `metricbeat-*`: KPI numbers (load, disk `/`, processes, TCP), a CPU gauge, a horizontal RAM bar coloured by threshold (green under 60%, yellow up to 80%, red above), a disk gauge, a CPU line, a memory area, load bars, horizontal process bars, a disk donut, a pie of metric sets, a process-CPU heatmap, an `eth0` network area, and tables. NDJSON import: `instructor/kibana/dashboards-metrics.ndjson`.
 
 Data views: `filebeat-*` (`dv-filebeat`), `metricbeat-*` (`dv-metricbeat`), `winlogbeat-*` (`dv-winlogbeat`).
 
@@ -1256,7 +1257,7 @@ fail to get the Kibana version: fail to parse kibana version (): passed version 
 
 **Method checked in the lab** — import NDJSON (UI or API):
 
-1. **UI**: **Stack Management → Saved Objects → Import** → files `instructor/kibana/dashboards-lab-linux.ndjson`, `dashboards-metrics.ndjson` and `dashboards-lab-windows.ndjson` (provided by the instructor, no secrets) → tick *Overwrite* if asked.
+1. **UI**: **Stack Management → Saved Objects → Import** → files `instructor/kibana/dashboards-lab-linux.ndjson`, `dashboards-metrics.ndjson`, `dashboards-lab-windows.ndjson` and `dashboards-geoip.ndjson` (provided by the instructor, no secrets) → tick *Overwrite* if asked.
 2. **API** (from a machine that can reach the SIEM). Each `curl` sends one NDJSON file to Kibana's saved-object import API (`overwrite=true` replaces an object that already has the same id):
 
 ```bash
@@ -1270,6 +1271,10 @@ curl -s -H 'kbn-xsrf: true' \
 
 curl -s -H 'kbn-xsrf: true' \
   -F file=@dashboards-lab-windows.ndjson \
+  "http://IP_SIEM:5601/api/saved_objects/_import?overwrite=true"
+
+curl -s -H 'kbn-xsrf: true' \
+  -F file=@dashboards-geoip.ndjson \
   "http://IP_SIEM:5601/api/saved_objects/_import?overwrite=true"
 ```
 
@@ -1334,6 +1339,109 @@ host.name: "server-name" and message: "error"
 3. Optional Kibana alerts (depends on licence and version): failed-logon threshold, high CPU.
 
 **Hint**: Windows fields `winlog.event_id`, `winlog.channel`; Suricata ECS fields `rule.name`, `event.kind`.
+
+### 4.6 GeoIP map: where traffic goes, who arrives
+
+The Filebeat Suricata ingest pipeline (`filebeat-*-suricata-eve-pipeline`) already runs a **GeoIP** processor on `source.ip` and `destination.ip`. Elasticsearch keeps the GeoLite2 databases up to date (City, Country, ASN). You do not create a MaxMind account.
+
+Private addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) get no coordinates. Only public addresses show up on the map:
+
+- **outbound** traffic: `destination.geo.location` (the source is the VM, so it is private);
+- connections **to the VM**: `source.geo.location` (the destination is the VM, so it is private).
+
+**Dashboard SIEM — GeoIP** (`dash-siem-geoip`, default window 24 hours, data view `filebeat-*`) has two maps and five tables: destination country and IP, source country and IP, and alerts `rule.name: "ESAIP-LAB-SSH-PROBE"`. URL: `/app/dashboards#/view/dash-siem-geoip`. Import: `instructor/kibana/dashboards-geoip.ndjson` (§4.3).
+
+A website behind a CDN often geolocates to the United States or France, not to the country in the domain name. The country on the map is the country of the IP that was actually contacted.
+
+#### Outbound traffic
+
+Run the requests **from the monitored VM**. A `curl` to `localhost` does not cross `eth0`, so Suricata does not see it.
+
+```bash
+for h in \
+  www.service-public.fr www.bundestag.de www.cam.ac.uk www.boe.es \
+  www.uniroma1.it www.uva.nl www.kth.se www.uio.no www.uw.edu.pl \
+  www.ulisboa.pt www.tcd.ie www.univie.ac.at www.uoa.gr www.mit.edu \
+  www.utoronto.ca www.uba.ar www.unam.mx www.uchile.cl www.snu.ac.kr \
+  www.sydney.edu.au www.auckland.ac.nz www.iitb.ac.in www.uct.ac.za \
+  www.um5.ac.ma www.metu.edu.tr www.tau.ac.il www.uaeu.ac.ae \
+  www.tsinghua.edu.cn www.ntu.edu.tw www.chula.ac.th www.ui.ac.id \
+  www.hi.is www.unibuc.ro www.elte.hu www.gov.za www.admin.ch \
+  www.canada.ca www.japan.go.jp www.australia.gov.au
+do
+  curl -sS -o /dev/null -w "%{http_code} ${h}\n" \
+    --connect-timeout 5 --max-time 12 -L --max-redirs 2 "https://${h}/" || true
+done
+```
+
+- `-L`: follow redirects; `--max-redirs 2`: stop after two hops.
+- Any HTTP status (even `403`, or a TLS failure after the SYN) is enough: Suricata records the flow, and the pipeline fills `destination.geo.*`.
+
+Check in Discover: `event.dataset: "suricata.eve" and source.ip: "IP_SURVEILLEE" and destination.geo.country_name: *`.
+
+#### Inbound connections
+
+The VM is not reachable from the Internet. To plot “who connects”, send **a few TCP SYNs to port 22 of the monitored VM only**, with a public address in the IP source field. The handshake does not complete: no password is tried, and `sshd` never sees a session.
+
+Check first that nothing will drop these packets:
+
+- Suricata stays in IDS mode: in `/etc/suricata/suricata.yaml`, `copy-mode: ips` stays commented, and `af-packet` listens on `eth0`.
+- `rule-files` loads only `alert` rules (no active `drop` / `reject`).
+- UFW is inactive and the iptables policy is `ACCEPT`.
+
+Add a lab alert, not a block. File `/var/lib/suricata/rules/lab-geo.rules`:
+
+```
+alert tcp !$HOME_NET any -> $HOME_NET 22 (msg:"ESAIP-LAB-SSH-PROBE"; flags:S; sid:9000002; rev:1;)
+```
+
+In `rule-files`, next to `lab-test.rules`:
+
+```yaml
+rule-files:
+  - lab-test.rules
+  - lab-geo.rules
+```
+
+Then `sudo suricatasc -c reload-rules`. `$HOME_NET` already includes `10.0.0.0/8` and `172.16.0.0/12`, so a real SSH session from the lab network does not match. Suricata may warn that the to-client direction is ignored for a bare SYN; SYNs toward the server are still detected.
+
+From the workstation, forging the source address needs root (`nping` reports `Mode TCP requires root privileges`), and the campus gateway may drop a packet whose source is not the workstation’s own address. The method checked in the lab: send the SYNs **from the SIEM VM**, on the same LAN as the sensor, and only toward `IP_SURVEILLEE` port 22. Three SYNs per address are enough.
+
+```bash
+# On the SIEM VM, as root. Replace IP_SURVEILLEE.
+sudo python3 - << 'PY'
+import socket, struct, random, time
+dst = "IP_SURVEILLEE"
+sources = ["8.8.8.8", "80.67.169.12", "194.150.168.168", "129.67.1.190",
+           "202.12.27.33", "223.5.5.5", "200.160.0.8", "157.92.1.1",
+           "129.78.5.8", "137.132.1.1", "196.216.2.6", "132.66.1.1"]
+
+def checksum(data):
+    if len(data) % 2:
+        data += b"\x00"
+    s = sum(struct.unpack("!%dH" % (len(data) // 2), data))
+    while s > 0xFFFF:
+        s = (s & 0xFFFF) + (s >> 16)
+    return ~s & 0xFFFF
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+for src in sources:
+    for n in range(3):
+        ip_s, ip_d = socket.inet_aton(src), socket.inet_aton(dst)
+        ip_id = random.randint(1, 65535)
+        ip = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40, ip_id, 0, 64, 6, 0, ip_s, ip_d)
+        ip = struct.pack("!BBHHHBBH4s4s", 0x45, 0, 40, ip_id, 0, 64, 6, checksum(ip), ip_s, ip_d)
+        seq = random.randint(0, 2**32 - 1)
+        tcp = struct.pack("!HHLLBBHHH", 41000 + n, 22, seq, 0, 5 << 4, 2, 65535, 0, 0)
+        pseudo = struct.pack("!4s4sBBH", ip_s, ip_d, 0, 6, len(tcp))
+        tcp = struct.pack("!HHLLBBHHH", 41000 + n, 22, seq, 0, 5 << 4, 2, 65535, checksum(pseudo + tcp), 0)
+        sock.sendto(ip + tcp, (dst, 0))
+        time.sleep(0.02)
+print("sent", 3 * len(sources))
+PY
+```
+
+On the sensor, `tcpdump -ni eth0 'tcp dst port 22'` shows the SYNs, and `eve.json` contains `ESAIP-LAB-SSH-PROBE`. In Kibana: `rule.name: "ESAIP-LAB-SSH-PROBE" and source.geo.country_name: *`.
 
 ---
 
@@ -1723,6 +1831,7 @@ Before you finish, confirm that:
 - [ ] Apache logs are visible (`event.dataset: "apache.access"`)
 - [ ] Metricbeat is collecting host metrics (`metricbeat-*`)
 - [ ] You have at least **Dashboard SIEM Lab Linux** (or 3 visualisations plus an equivalent dashboard)
+- [ ] **Dashboard SIEM — GeoIP**: destination points (outbound traffic) and source points (connections to the VM)
 - [ ] Winlogbeat is installed (same branch as the SIEM), the service is **Running**, data view `winlogbeat-*` exists
 - [ ] You have at least **Dashboard SIEM Lab Windows** (or the equivalent for 4624 / 4625 / channels)
 - [ ] Configurations and findings are written down, including the Windows source IP towards SIEM:9200
