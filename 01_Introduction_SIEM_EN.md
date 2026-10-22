@@ -98,37 +98,40 @@ You will know:
 ┌─────────────────────────────────────────────────────────┐
 │                    Data Sources                         │
 ├──────────┬──────────┬──────────┬──────────┬─────────────┤
-│  IDS/IPS │  Firewall│  Servers │  Windows │  Network    │
+│  IDS/IPS │  Firewall│  Serveurs│  Windows │  Network    │
 │          │          │  Linux   │  Events  │  Appliances │
 └────┬─────┴────┬─────┴────┬─────┴────┬─────┴─────┬───────┘
      │          │          │          │           │
      └──────────┴──────────┴──────────┴───────────┘
                     │
          ┌──────────▼──────────┐
-         │  Agents/Collectors  │
+         │  Agents/Collecteurs │
          │ (Beats, Syslog, etc)│
          └──────────┬──────────┘
                     │
+               ┌────▼─────┐
+               │ Logstash │
+               └────┬─────┘
+               ┌────▼─────┐
+               │ Stockage │
+               │ (Elastic)│
+               └────┬─────┘
+                    │
          ┌──────────▼───────────┐
-         │   SIEM Engine         │
+         │   SIEM  Engine       │
          │  ┌────────────────┐  │
-         │  │ Normalization  │  │
-         │  │ Correlation    │  │
-         │  │ Analysis       │  │
+         │  │  Normalization │  │
+         │  │  Correlation   │  │
+         │  │  Analysis      │  │
          │  └────────────────┘  │
          └──────────┬───────────┘
                     │
-     ┌──────────────┴──────────────┐
+     ┌──────────────┴───────────────┐
      │                              │
 ┌────▼─────┐              ┌─────────▼────────┐
-│ Storage │              │  Visualization    │
-│(Elastic)│              │     (Kibana)      │
-└────┬─────┘              └──────────────────┘
-     │
-┌────▼─────┐
-│ Alerts  │
-│& Response│
-└──────────┘
+│ Alerts   │              │   Visualisation  │
+│ Response │              │     (Kibana)     │
+└──────────┘              └──────────────────┘
 ```
 
 ### 4.2 Data Processing Chain
