@@ -36,6 +36,7 @@ Vous allez :
 À l'issue de ce TP, vous serez capable de :
 
 - Installer et configurer Elasticsearch, Logstash et Kibana
+- Mettre en place TLS (HTTP et transport) et l’authentification entre les composants
 - Optimiser Elasticsearch pour fonctionner avec des ressources limitées
 - Configurer Filebeat pour collecter les logs système
 - Configurer Winlogbeat pour collecter les événements Windows
@@ -49,20 +50,21 @@ Le labo ESAIP utilise **deux VMs Linux** plus un **poste Windows** (navigateur K
 
 #### VM SIEM (collecteur ELK)
 - **Rôle** : Elasticsearch, Kibana, Logstash
-- **OS** : Debian 13 (Trixie) — vérifié en labo : `13.5`
-- **Stack observée** : Elastic **9.5.x** (dépôt `9.x`) — labo enseignant : **9.5.4**
-- **RAM** : selon votre affectation Proxmox (souvent ~2 Go en salle ; le labo enseignant peut avoir davantage)
-- **Accès** : SSH ; Kibana sur le port `5601`
+- **OS** : Debian 13 (Trixie)
+- **Stack** : Elastic **9.5.x** (dépôt `9.x`)
+- **Ressources** : **8 Go RAM**, **8 vCPU**, ~20 Go disque — si ~2 Go RAM, réduire le heap (§2.2) ; une VM SIEM < 4 Go est déconseillée dès que Kibana + Logstash tournent ensemble
+- **Accès** : SSH ; Kibana sur le port `5601` (HTTP) ; Elasticsearch sur `9200` (HTTPS)
+- **Heaps (8 Go)** : Elasticsearch `-Xms2g -Xmx2g` ; Logstash `-Xms512m -Xmx512m` ; `xpack.ml.enabled: false`
 
 #### VM à surveiller (Linux)
 - **Rôle** : sources de logs / métriques envoyées vers le SIEM
-- **OS** : Debian 13
+- **OS** : Debian 13 — **~2 Go RAM**, **2 vCPU**
 - **Services cibles** : Suricata (alertes), SSH (`auth.log`), Apache, Metricbeat
-- **Agents** : Filebeat + Metricbeat pointant vers l’IP de la VM SIEM (`IP_SIEM:9200`)
+- **Agents** : Filebeat + Metricbeat → `https://IP_SIEM:9200` (TLS + utilisateur `beats_writer`)
 
 #### Poste Windows
-- Accès à Kibana : `http://IP_SIEM:5601`
-- **Winlogbeat** (même branche que le SIEM, ex. **9.5.4**) : journaux Application / System / Security → Elasticsearch `http://IP_SIEM:9200`
+- Accès à Kibana : `http://IP_SIEM:5601` (login `elastic`)
+- **Winlogbeat** (même branche que le SIEM) : journaux Application / System / Security → Elasticsearch `https://IP_SIEM:9200`
 - Vérifiez quelle interface Windows atteint réellement le SIEM (`curl` + `Get-NetTCPConnection`) — un poste multi-homed peut joindre le labo via Ethernet alors que la Wi-Fi sert à autre chose
 
 #### Architecture réseau
@@ -231,10 +233,18 @@ Avec **~2 Go** de RAM (salle typique), placez ceci dans le fichier :
 -Xmx512m
 ```
 
-Avec **~8 Go** de RAM (labo enseignant / VM plus large) :
+Avec **~8 Go** de RAM et **8 vCPU** :
 
 ```properties
-# Heap 1 Go — laisse de la marge pour Kibana et Logstash
+# Heap 2 Go — marge confortable pour Kibana + Logstash sur 8 Go
+-Xms2g
+-Xmx2g
+```
+
+Avec **~6 Go** de RAM (autre sizing courant) :
+
+```properties
+# Heap 1 Go
 -Xms1g
 -Xmx1g
 ```
@@ -242,103 +252,140 @@ Avec **~8 Go** de RAM (labo enseignant / VM plus large) :
 **Explication** :
 - `-Xms` / `-Xmx` : taille initiale et maximale du heap JVM (gardez-les égales).
 - La mémoire totale utilisée par Elasticsearch dépasse le heap (off-heap, buffers, processus auxiliaires).
-- Vérifiez après démarrage avec `curl http://localhost:9200/_nodes/jvm?pretty` (`heap_max_in_bytes`).
+- Vérifiez après démarrage avec `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_nodes/jvm?pretty` (`heap_max_in_bytes`).
 
-#### Étape 6 : Configuration réseau d'Elasticsearch
+#### Étape 6 : Certificats TLS
 
-Éditez la configuration principale pour exposer l’API HTTP, nommer le nœud et désactiver la sécurité (labo uniquement).
+Installez `unzip` si besoin, puis générez une CA et un certificat nœud avec **SAN** (localhost + IP du SIEM). Remplacez `IP_SIEM` par l’IP réelle.
+
+```bash
+sudo apt install -y unzip
+CERTDIR=/tmp/es-certs
+sudo mkdir -p "$CERTDIR" && cd "$CERTDIR"
+sudo /usr/share/elasticsearch/bin/elasticsearch-certutil ca --pem --out "$CERTDIR/ca.zip" --silent
+sudo unzip -oq ca.zip
+sudo /usr/share/elasticsearch/bin/elasticsearch-certutil cert --pem \
+  --ca-cert "$CERTDIR/ca/ca.crt" --ca-key "$CERTDIR/ca/ca.key" \
+  --dns localhost --dns "$(hostname -s)" \
+  --ip 127.0.0.1 --ip IP_SIEM \
+  --out "$CERTDIR/certs.zip" --silent
+sudo unzip -oq certs.zip
+INSTANCE=$(sudo find "$CERTDIR" -mindepth 1 -maxdepth 1 -type d ! -name ca | head -1)
+
+sudo mkdir -p /etc/elasticsearch/certs
+sudo cp "$CERTDIR/ca/ca.crt" /etc/elasticsearch/certs/ca.crt
+sudo cp "$CERTDIR/ca/ca.crt" /etc/elasticsearch/certs/http_ca.crt
+sudo cp "$INSTANCE"/*.crt /etc/elasticsearch/certs/node.crt
+sudo cp "$INSTANCE"/*.key /etc/elasticsearch/certs/node.key
+sudo chown -R elasticsearch:elasticsearch /etc/elasticsearch/certs
+sudo chmod 640 /etc/elasticsearch/certs/*
+# Copie utilisable pour scp vers les Beats / votre PC
+sudo cp /etc/elasticsearch/certs/http_ca.crt /home/$USER/http_ca.crt
+sudo chown $USER:$USER /home/$USER/http_ca.crt
+```
+
+#### Étape 7 : Configuration d'Elasticsearch
+
+Éditez la configuration principale pour exposer l’API, nommer le nœud et activer TLS + authentification.
 
 ```bash
 sudo nano /etc/elasticsearch/elasticsearch.yml
 ```
 
-**Configuration pour Elasticsearch 9.x** (observé en labo : **9.5.4**) :
-
-La configuration par défaut d'Elasticsearch 9.x inclut déjà certaines options. Vous devez vérifier et modifier les paramètres suivants :
+**Configuration pour Elasticsearch 9.x** :
 
 ```yaml
-# Réseau et HTTP (déjà présent dans la config par défaut avec http.host)
-# Vérifiez que ces lignes sont présentes :
+cluster.name: siem-cluster
+node.name: siem-node-1
+path.data: /var/lib/elasticsearch
+path.logs: /var/log/elasticsearch
+network.host: 0.0.0.0
 http.host: 0.0.0.0
 http.port: 9200
+discovery.type: single-node
 
-# Nom du cluster (optionnel, pour identification)
-cluster.name: siem-cluster
-
-node.name: siem-node-1
-
-# Désactiver SSL/HTTPS pour le labo (à ne pas faire en production)
-# Enable security features
-xpack.security.enabled: false
-
+xpack.security.enabled: true
 xpack.security.enrollment.enabled: false
+xpack.ml.enabled: false
 
-# Enable encryption for HTTP API client connections, such as Kibana, Logstash, and Agents
 xpack.security.http.ssl:
-  enabled: false
-  keystore.path: certs/http.p12
+  enabled: true
+  certificate: certs/node.crt
+  key: certs/node.key
+  certificate_authorities: ["certs/ca.crt"]
 
-# Enable encryption and mutual authentication between cluster nodes
 xpack.security.transport.ssl:
-  enabled: false
+  enabled: true
   verification_mode: certificate
-  keystore.path: certs/transport.p12
-  truststore.path: certs/transport.p12
-  
-cluster.initial_master_nodes: ["siem-node-1"]
-
+  certificate: certs/node.crt
+  key: certs/node.key
+  certificate_authorities: ["certs/ca.crt"]
 ```
 
-**Notes importantes** :
-- En production, vous devriez activer la sécurité et utiliser SSL/TLS.
-- Dans Elasticsearch 9.x, utilisez `http.host` au lieu de `network.host`.
-- Remplacez `"siem-node-1"` dans `cluster.initial_master_nodes` par la valeur de `node.name` que vous avez définie (ou gardez le nom de votre machine si vous n'avez pas changé `node.name`).
-- Par défaut, `xpack.security.enabled` vaut `true` : pour le labo, forcez `false` comme ci-dessus, sinon Beats et `curl` sans identifiants échoueront.
+**Notes** :
+- Dans Elasticsearch 9.x, `http.host` complète / remplace l’ancien `network.host` pour l’API HTTP.
+- Sur un seul nœud, `discovery.type: single-node` évite `cluster.initial_master_nodes`.
+- Ne mettez **jamais** les mots de passe réels dans un dépôt Git.
 
-#### Étape 7 : Démarrage d'Elasticsearch
-
-Lancez le service maintenant, puis activez le démarrage automatique au boot pour qu’Elasticsearch survive aux redémarrages de la VM.
+#### Étape 8 : Démarrage et comptes
 
 ```bash
-sudo systemctl start elasticsearch
-```
-
-```bash
-sudo systemctl enable elasticsearch
-```
-
-Contrôlez que le service est bien `active (running)` :
-
-```bash
+sudo systemctl enable --now elasticsearch
 sudo systemctl status elasticsearch
 ```
 
-#### Étape 8 : Vérification du fonctionnement
-
-Attendez 30-60 secondes que Elasticsearch initialise le cluster, puis interrogez l’API locale : une réponse JSON confirme que le nœud répond.
+Attendez 30–60 s. Sans mot de passe, l’API répond en **401** (TLS OK, auth requise) :
 
 ```bash
-curl http://localhost:9200
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:9200
 ```
 
-Vous devriez voir une réponse JSON avec les informations du cluster.
-
-**Vérification** : après redémarrage, confirmez que le heap appliqué correspond à votre fichier `.options` :
+Réinitialisez les comptes built-in (notez les « New value ») :
 
 ```bash
-curl http://localhost:9200/_nodes/jvm?pretty
+sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b
+sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system -b
 ```
 
-`?pretty` : formate le JSON pour le lire plus facilement. Cherchez `heap_used` et `heap_max` dans la réponse.
-
-Testez aussi depuis un autre hôte du labo (remplacez `IP_SIEM`) : cela prouve que `http.host: 0.0.0.0` expose bien le port `9200` sur le réseau.
+Créez un rôle et un utilisateur pour les Beats :
 
 ```bash
-# Depuis un autre hôte du labo
-curl http://IP_SIEM:9200
+export ELASTIC_PASS='…'   # mot de passe elastic ci-dessus
+export BEATS_PASS='…'     # mot de passe fort choisi pour beats_writer
+
+curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt \
+  -X PUT "https://127.0.0.1:9200/_security/role/beats_writer_role" \
+  -H 'Content-Type: application/json' -d '{
+  "cluster": ["monitor","manage_index_templates","manage_ingest_pipelines","manage_pipeline","manage_ilm"],
+  "indices": [{
+    "names": ["filebeat-*","metricbeat-*","winlogbeat-*","logs-*","logstash-*"],
+    "privileges": ["write","create","create_index","view_index_metadata","auto_configure","manage"]
+  }]
+}'
+
+curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt \
+  -X POST "https://127.0.0.1:9200/_security/user/beats_writer" \
+  -H 'Content-Type: application/json' -d "{
+  \"password\": \"${BEATS_PASS}\",
+  \"roles\": [\"beats_writer_role\"],
+  \"full_name\": \"Beats lab writer\"
+}"
 ```
 
-**Vérification** : si vous obtenez une réponse JSON, Elasticsearch fonctionne correctement.
+#### Étape 9 : Vérification
+
+```bash
+curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt https://127.0.0.1:9200
+curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt https://127.0.0.1:9200/_nodes/jvm?pretty
+```
+
+Vous devez obtenir du JSON (infos cluster / heap). Depuis un autre hôte du labo (avec la CA copiée) :
+
+```bash
+curl -sk -u "elastic:${ELASTIC_PASS}" --cacert ./http_ca.crt https://IP_SIEM:9200
+```
+
+Sur un cluster à **un seul nœud**, le statut `yellow` (réplicas non assignés) est **normal**.
 
 #### Aide : Résolution d'un problème de mémoire
 
@@ -366,40 +413,45 @@ sudo apt install -y kibana
 
 #### Étape 2 : Configuration de Kibana
 
-Éditez la config pour faire écouter Kibana sur toutes les interfaces et le pointer vers Elasticsearch local.
+Copiez la CA Elasticsearch, puis éditez `kibana.yml` pour pointer vers HTTPS et le compte `kibana_system`.
 
 ```bash
+sudo mkdir -p /etc/kibana/certs
+sudo cp /etc/elasticsearch/certs/http_ca.crt /etc/kibana/certs/http_ca.crt
+sudo chown -R kibana:kibana /etc/kibana/certs
+ENC_KEY=$(openssl rand -hex 32)   # ≥ 32 caractères — gardez-la
 sudo nano /etc/kibana/kibana.yml
 ```
 
-Modifiez (ou vérifiez) les paramètres suivants :
-
 ```yaml
-# Adresse d'écoute
 server.host: "0.0.0.0"
-
-# Port
 server.port: 5601
 
-# URL d'Elasticsearch
-elasticsearch.hosts: ["http://localhost:9200"]
+elasticsearch.hosts: ["https://127.0.0.1:9200"]
+elasticsearch.username: "kibana_system"
+elasticsearch.password: "KIBANA_SYSTEM_PASS"
+elasticsearch.ssl.certificateAuthorities: ["/etc/kibana/certs/http_ca.crt"]
+elasticsearch.ssl.verificationMode: full
+
+xpack.encryptedSavedObjects.encryptionKey: "ENC_KEY"
+xpack.reporting.encryptionKey: "ENC_KEY"
+xpack.security.encryptionKey: "ENC_KEY"
 ```
 
-- `server.host: "0.0.0.0"` : accessible depuis votre PC Windows, pas seulement en local.
-- `elasticsearch.hosts` : Kibana lit/écrit les données via l’API Elasticsearch.
+Remplacez `KIBANA_SYSTEM_PASS` et `ENC_KEY` par les valeurs réelles, puis :
+
+```bash
+sudo chmod 640 /etc/kibana/kibana.yml
+sudo chown root:kibana /etc/kibana/kibana.yml
+```
+
+- `server.host: "0.0.0.0"` : accessible depuis votre PC Windows.
+- Kibana écoute en **HTTP** sur `:5601` ; le lien **Kibana → Elasticsearch** est en **HTTPS**.
 
 #### Étape 3 : Démarrage de Kibana
 
-Démarrez Kibana et activez le démarrage au boot.
-
 ```bash
-sudo systemctl start kibana
-sudo systemctl enable kibana
-```
-
-Contrôlez l’état du service :
-
-```bash
+sudo systemctl enable --now kibana
 sudo systemctl status kibana
 ```
 
@@ -407,23 +459,19 @@ sudo systemctl status kibana
 - Kibana peut prendre **1-2 minutes** pour démarrer complètement.
 - **Lors du premier démarrage**, Kibana effectue des migrations d'objets sauvegardés qui peuvent prendre **3-5 minutes** supplémentaires.
 - Pendant ce temps, la page web peut rester en chargement. C'est **normal**.
-- Suivez les logs en direct (`-f` = follow) pour voir l’état des migrations :
-
-  ```bash
-  sudo journalctl -u kibana -f
-  ```
-
-  Vous devriez voir "Starting saved objects migrations" puis "Migration completed" ou similaire.
+- Suivez les logs : `sudo journalctl -u kibana -f` — absence de `Unable to connect to Elasticsearch` / erreur SSL.
 
 #### Étape 4 : Accès à Kibana
 
-Depuis le navigateur de votre poste Windows, ouvrez l’URL ci-dessous (remplacez `IP_SIEM`) :
+Depuis le navigateur de votre poste Windows (remplacez `IP_SIEM`) :
 
 ```
 http://IP_SIEM:5601
 ```
 
-**Vérification** : vous devriez voir la page d'accueil de Kibana.
+Connectez-vous avec l’utilisateur **`elastic`** et le mot de passe obtenu via `elasticsearch-reset-password`.
+
+**Vérification** : page de login puis interface Kibana.
 
 #### Aide : Configuration de l'accès depuis Windows
 
@@ -531,7 +579,11 @@ filter {
 
 output {
   elasticsearch {
-    hosts => ["http://localhost:9200"]
+    hosts => ["https://127.0.0.1:9200"]
+    user => "elastic"
+    password => "${ELASTIC_PASS}"
+    ssl_enabled => true
+    cacert => "/etc/elasticsearch/certs/http_ca.crt"
     index => "test-logs-%{+YYYY.MM.dd}"
   }
   stdout {
@@ -539,6 +591,8 @@ output {
   }
 }
 ```
+
+Avant de démarrer Logstash, copiez la CA si besoin (`sudo cp /etc/elasticsearch/certs/http_ca.crt /etc/logstash/http_ca.crt` et adaptez `cacert`) et substituez le mot de passe `elastic` (évitez de laisser un secret en clair durablement — labo uniquement).
 
 - `sincedb_path => "/dev/null"` : ignore la position de lecture précédente (utile pour un test reproductible).
 - `index => "test-logs-%{+YYYY.MM.dd}"` : crée un index Elasticsearch daté du jour.
@@ -647,7 +701,11 @@ filter {
 
 output {
   elasticsearch {
-    hosts => ["http://localhost:9200"]
+    hosts => ["https://127.0.0.1:9200"]
+    user => "elastic"
+    password => "${ELASTIC_PASS}"
+    ssl_enabled => true
+    cacert => "/etc/elasticsearch/certs/http_ca.crt"
     index => "apache-logs-%{+YYYY.MM.dd}"
   }
   stdout {
@@ -769,15 +827,29 @@ sudo apt install -y filebeat
 sudo nano /etc/filebeat/filebeat.yml
 ```
 
-Configurez la section `output.elasticsearch` pour cibler **le SIEM** (pas `localhost` si Filebeat tourne sur la VM à surveiller) :
+Sur la VM à surveiller, récupérez d’abord la CA depuis le SIEM :
+
+```bash
+scp UTILISATEUR@IP_SIEM:~/http_ca.crt /tmp/http_ca.crt
+sudo mkdir -p /etc/filebeat/certs /etc/metricbeat/certs
+sudo cp /tmp/http_ca.crt /etc/filebeat/certs/http_ca.crt
+sudo cp /tmp/http_ca.crt /etc/metricbeat/certs/http_ca.crt
+```
+
+Configurez la section `output.elasticsearch` pour cibler **le SIEM** en HTTPS :
 
 ```yaml
 output.elasticsearch:
-  hosts: ["IP_SIEM:9200"]
-  # Sécurité désactivée côté labo (xpack.security.enabled: false)
+  hosts: ["https://IP_SIEM:9200"]
+  username: "beats_writer"
+  password: "BEATS_PASS"
+  ssl:
+    enabled: true
+    certificate_authorities: ["/etc/filebeat/certs/http_ca.crt"]
+    verification_mode: full
 ```
 
-`IP_SIEM:9200` : adresse et port HTTP d’Elasticsearch sur le collecteur. Vérifiez la connectivité : `curl http://IP_SIEM:9200` puis `sudo filebeat test output`.
+Vérifiez : `sudo filebeat test output` — attendu : `TLS... handshake... OK` puis `talk to server... OK`.
 
 #### Étape 3 : Activation des modules (système, Apache, Suricata)
 
@@ -786,6 +858,8 @@ Activez les modules Filebeat qui savent lire les logs SSH/auth, Apache et Surica
 ```bash
 sudo filebeat modules enable system apache suricata
 ```
+
+**Suricata** : n’activez le module que si `/var/log/suricata/eve.json` existe **et** que le fileset `eve` est configuré. Sinon : `sudo filebeat modules disable suricata` (sinon Filebeat refuse de démarrer).
 
 #### Étape 4 : Configuration des modules
 
@@ -880,7 +954,7 @@ sudo systemctl enable --now filebeat
 sudo systemctl status filebeat
 ```
 
-Les index / data streams observés en labo : `.ds-filebeat-9.5.4-*` (pattern Kibana : `filebeat-*`).
+Les index / data streams : `.ds-filebeat-*` (pattern Kibana : `filebeat-*`).
 
 #### Étape 6 : Vérification dans Kibana
 
@@ -910,7 +984,7 @@ Générez du trafic, puis vérifiez `apache.access` dans Discover.
 ### 3.2 Installation et configuration de Winlogbeat
 
 > **Où travailler** : sur votre **poste Windows** (PowerShell **en tant qu’administrateur**).  
-> Alignez la version Winlogbeat sur celle du SIEM (labo enseignant : **9.5.4**).  
+> Alignez la version Winlogbeat sur celle du SIEM.  
 > Remplacez `IP_SIEM` par l’adresse IP de la VM ELK.
 
 #### Étape 0 : Vérifier la connectivité vers Elasticsearch
@@ -918,7 +992,7 @@ Générez du trafic, puis vérifiez `apache.access` dans Discover.
 Avant d’installer l’agent, confirmez que **ce** poste Windows joint le SIEM sur le port `9200` (sinon Winlogbeat installé mais muet).
 
 ```powershell
-curl.exe -s http://IP_SIEM:9200
+curl.exe -sk -u elastic:ELASTIC_PASS --cacert C:\path\to\http_ca.crt https://IP_SIEM:9200
 # Doit renvoyer un JSON (cluster.name, version.number, …)
 
 # Quelle IP source Windows est utilisée ?
@@ -929,7 +1003,7 @@ Get-NetTCPConnection -RemoteAddress IP_SIEM -RemotePort 9200 |
 - `curl.exe` : le client HTTP Windows (évite l’alias PowerShell `curl` = `Invoke-WebRequest`).
 - `Get-NetTCPConnection` : montre l’interface locale réellement utilisée vers le SIEM.
 
-**Note labo** : un poste multi-homed (Wi-Fi + Ethernet) peut atteindre le SIEM via une interface différente de celle utilisée pour VNC ou le navigateur. Notez l’`LocalAddress` réellement utilisée (ex. observé en labo enseignant : Ethernet `172.16.192.4` → `10.2.1.3:9200`).
+Un poste multi-homed (Wi-Fi + Ethernet) peut atteindre le SIEM via une interface différente de celle utilisée pour VNC ou le navigateur. Notez l’`LocalAddress` réellement utilisée.
 
 Si `curl` échoue : route (`Find-NetRoute -RemoteIPAddress IP_SIEM`), pare-feu Windows, et ouverture du port `9200` côté SIEM.
 
@@ -967,10 +1041,16 @@ winlogbeat.event_logs:
     ignore_older: 72h
 
 output.elasticsearch:
-  hosts: ["http://IP_SIEM:9200"]
-  # Sécurité désactivée côté labo (xpack.security.enabled: false) — pas de mot de passe ES
+  hosts: ["https://IP_SIEM:9200"]
+  username: "beats_writer"
+  password: "BEATS_PASS"
+  ssl:
+    enabled: true
+    certificate_authorities: ["C:\\path\\to\\http_ca.crt"]
+    verification_mode: full
 ```
 
+Copiez `http_ca.crt` depuis le SIEM sur le PC Windows et adaptez le chemin.  
 `ignore_older: 72h` : ne renvoie pas les événements plus vieux que 72 h (évite un flood au premier démarrage).
 
 Puis validez la syntaxe YAML, la connexion Elasticsearch et la version de l’agent :
@@ -1022,12 +1102,12 @@ eventcreate /T INFORMATION /ID 1000 /L APPLICATION /D "Test SIEM Winlogbeat"
 #### Étape 5 : Vérification dans Kibana
 
 1. Attendez une minute que les événements partent
-2. Data view : `winlogbeat-*` (champ temporel `@timestamp`) — id instructeur : `dv-winlogbeat`
+2. Data view : `winlogbeat-*` (champ temporel `@timestamp`)
 3. Dans **Discover**, filtres utiles :
    - Connexions réussies : `winlog.event_id: 4624`
    - Échecs de connexion : `winlog.event_id: 4625`
    - Canal Security : `winlog.channel: "Security"`
-4. Data stream observé en labo : `.ds-winlogbeat-9.5.4-*` (pattern Kibana : `winlogbeat-*`)
+4. Data streams : `.ds-winlogbeat-*` (pattern Kibana : `winlogbeat-*`)
 
 **Vérification** : documents Application / System / Security présents ; agent.version aligné sur le SIEM.
 
@@ -1079,11 +1159,17 @@ sudo apt install -y metricbeat
 sudo nano /etc/metricbeat/metricbeat.yml
 ```
 
-Configurez la sortie vers le SIEM :
+Configurez la sortie vers le SIEM (même CA / utilisateur que Filebeat) :
 
 ```yaml
 output.elasticsearch:
-  hosts: ["IP_SIEM:9200"]
+  hosts: ["https://IP_SIEM:9200"]
+  username: "beats_writer"
+  password: "BEATS_PASS"
+  ssl:
+    enabled: true
+    certificate_authorities: ["/etc/metricbeat/certs/http_ca.crt"]
+    verification_mode: full
 ```
 
 #### Étape 3 : Activation des modules système
@@ -1112,13 +1198,13 @@ sudo systemctl status metricbeat
 sudo metricbeat test output
 ```
 
-Data stream observé : `.ds-metricbeat-9.5.4-*` (pattern Kibana : `metricbeat-*`).
+Data streams : `.ds-metricbeat-*` (pattern Kibana : `metricbeat-*`).
 
 #### Étape 6 : Vérification dans Kibana
 
 1. Créez une data view : `metricbeat-*` (`@timestamp`)
 2. Explorez dans **Discover** (`event.dataset: system.cpu`, `system.memory`, …)
-3. Ouvrez le dashboard labo (voir §4.3)
+3. Ouvrez (ou créez) votre dashboard métriques (voir §4.3)
 
 ---
 
@@ -1141,9 +1227,16 @@ packetbeat.protocols:
   - type: http
     ports: [80, 8080, 8000, 5000, 8002, 9200]
 output.elasticsearch:
-  hosts: ["IP_SIEM:9200"]
+  hosts: ["https://IP_SIEM:9200"]
+  username: "beats_writer"
+  password: "BEATS_PASS"
+  ssl:
+    enabled: true
+    certificate_authorities: ["/etc/packetbeat/certs/http_ca.crt"]
+    verification_mode: full
 ```
 
+Copiez aussi la CA dans `/etc/packetbeat/certs/`.  
 `device: any` : écoute sur toutes les interfaces (gourmand en CPU/RAM).
 
 Démarrez le service pour commencer à envoyer le trafic capturé vers Elasticsearch :
@@ -1227,63 +1320,22 @@ Répétez pour :
 
 Sauvegardez le dashboard : "Dashboard SIEM Principal"
 
-#### Dashboards labo déjà préparés (référence)
+#### Dashboards à construire vous-même
 
-En labo enseignant, les objets suivants sont créés dans Kibana (menu **Analytics → Dashboard**, ou URL relative) :
+Créez vos propres dashboards dans Kibana (**Analytics → Dashboard**). Ne comptez pas sur un import de fichiers fournis : sur Kibana **9.5**, `filebeat setup --dashboards` / `metricbeat setup --dashboards` échoue souvent (`fail to parse kibana version`), et ce n’est **pas** le livrable attendu.
 
-| Nom | ID / chemin | Sources | Filtres Discover utiles |
-| --- | --- | --- | --- |
-| **Dashboard SIEM Lab Linux** | `/app/dashboards#/view/dash-siem-lab-linux` | Suricata, SSH/auth, Apache, Metricbeat | panneaux = recherches sauvegardées |
-| **Dashboard SIEM — Suricata** | `/app/dashboards#/view/dash-siem-suricata` | Alertes Suricata | `event.kind: "alert"` |
-| **Dashboard SIEM — Métriques hôte** | `/app/dashboards#/view/dash-siem-metrics` | Metricbeat (CPU, mémoire, load, réseau, disque, processus, sockets) | `event.dataset: system.cpu` / `system.network`… |
-| **Dashboard SIEM Lab Windows** | `/app/dashboards#/view/dash-siem-lab-windows` | Winlogbeat (Security / System / Application) | `winlog.event_id: 4624` / `4625` |
-| **Dashboard SIEM — GeoIP** | `/app/dashboards#/view/dash-siem-geoip` | Suricata (GeoIP source et destination) | `destination.geo.country_name: *` / `source.geo.country_name: *` |
+Data views à créer (§4.1) : `filebeat-*`, `metricbeat-*`, `winlogbeat-*` (champ temporel `@timestamp`).
 
-Recherches sauvegardées Linux : `Lab — Alertes Suricata`, `Lab — Connexions SSH / auth`, `Lab — Apache access`, `Lab — Métriques hôte`.  
-Recherches sauvegardées Windows : `Lab — Connexions Windows réussies (4624)`, `Lab — Échecs de connexion Windows (4625)`, `Lab — Journal Security Windows`, `Lab — Canaux Windows (Security/System/Application)`.
+Cible minimale (noms libres, tant que le contenu est là) :
 
-Le dashboard **Métriques hôte** (`dash-siem-metrics`, fenêtre par défaut : 24 h) mélange plusieurs types de widgets Lens sur `metricbeat-*` : indicateurs (charge, disque `/`, processus, TCP), jauge CPU, barre horizontale de RAM colorée par seuils (vert sous 60 %, jaune jusqu’à 80 %, rouge au-delà), jauge disque, courbe CPU, aire mémoire, barres de charge, barres horizontales des processus, donut disque, camembert des jeux de métriques, heatmap CPU, aire réseau `eth0`, tableaux. Import NDJSON : `instructor/kibana/dashboards-metrics.ndjson`.
+| Dashboard | Sources | Panneaux / filtres utiles |
+| --- | --- | --- |
+| Vue Linux / sécurité | Suricata, SSH/auth, Apache, Metricbeat | `event.kind: "alert"`, `source.ip`, auth SSH, `http.response.status_code`, CPU/mémoire |
+| Métriques hôte | `metricbeat-*` | CPU, mémoire, load, disque `/`, réseau, processus (fenêtre ~24 h) |
+| Windows | `winlogbeat-*` | `winlog.event_id: 4624` / `4625`, `winlog.channel` |
+| GeoIP (si Suricata + trafic public) | `filebeat-*` | cartes `destination.geo.location` / `source.geo.location`, pays / IP |
 
-Data views : `filebeat-*` (`dv-filebeat`), `metricbeat-*` (`dv-metricbeat`), `winlogbeat-*` (`dv-winlogbeat`).
-
-#### Import des dashboards (méthode qui marche sur Kibana 9.5)
-
-**Ne comptez pas sur** `filebeat setup --dashboards` / `metricbeat setup --dashboards` : sur Kibana **9.5**, `/api/status` ne renvoie plus de champ `version` semver, et Beats échoue avec :
-
-```text
-fail to get the Kibana version: fail to parse kibana version (): passed version is not semver
-```
-
-**Méthode validée en labo** — import NDJSON (UI ou API) :
-
-1. **UI** : **Stack Management → Saved Objects → Import** → fichiers `instructor/kibana/dashboards-lab-linux.ndjson`, `dashboards-metrics.ndjson`, `dashboards-lab-windows.ndjson` et `dashboards-geoip.ndjson` (fournis par l’enseignant, sans secrets) → cocher *Overwrite* si demandé.
-2. **API** (depuis une machine qui joint le SIEM) — chaque `curl` envoie un fichier NDJSON à l’API d’import des objets Kibana (`overwrite=true` remplace un objet déjà présent du même id) :
-
-```bash
-curl -s -H 'kbn-xsrf: true' \
-  -F file=@dashboards-lab-linux.ndjson \
-  "http://IP_SIEM:5601/api/saved_objects/_import?overwrite=true"
-
-curl -s -H 'kbn-xsrf: true' \
-  -F file=@dashboards-metrics.ndjson \
-  "http://IP_SIEM:5601/api/saved_objects/_import?overwrite=true"
-
-curl -s -H 'kbn-xsrf: true' \
-  -F file=@dashboards-lab-windows.ndjson \
-  "http://IP_SIEM:5601/api/saved_objects/_import?overwrite=true"
-
-curl -s -H 'kbn-xsrf: true' \
-  -F file=@dashboards-geoip.ndjson \
-  "http://IP_SIEM:5601/api/saved_objects/_import?overwrite=true"
-```
-
-- `kbn-xsrf: true` : en-tête anti-CSRF exigé par l’API Kibana.
-- `-F file=@...` : envoie le fichier NDJSON en multipart (le `@` = chemin local du fichier).
-- Placez-vous dans le dossier où se trouvent les `.ndjson` fournis par l’enseignant (ou indiquez le chemin complet après `@`).
-
-Réponse attendue : `"success": true` et import des data views, recherches et dashboards listés ci-dessus.
-
-Alternative : créer à la main les data views + visualisations (§4.1–4.3 / §4.5) sans importer le NDJSON.
+Astuce : en **Discover**, filtrez, **Save** la recherche, puis **Add from library** sur le dashboard.
 
 ### 4.4 Recherche et analyse de logs
 
@@ -1319,23 +1371,20 @@ host.name: "nom-serveur" and message: "error"
 
 ### 4.5 Dashboard de sécurité avec alertes
 
-**Tâche (partie Linux — faite en labo)** :
-1. Utilisez **Dashboard SIEM Lab Linux** / **Dashboard SIEM — Suricata**, ou recréez un dashboard « Dashboard Sécurité Linux » avec :
-   - Alertes Suricata dans le temps (`event.kind: "alert"`, breakdown `rule.name`)
-   - Top IP sources (`source.ip`)
-   - Événements `system.auth` (SSH)
-   - Accès Apache (`http.response.status_code`)
-   - Métriques Metricbeat (CPU / mémoire)
-2. Sauvegardez le dashboard.
+**Tâche (partie Linux)** — créez un dashboard « Sécurité Linux » avec au minimum :
+- Alertes Suricata dans le temps (`event.kind: "alert"`, breakdown `rule.name`)
+- Top IP sources (`source.ip`)
+- Événements `system.auth` (SSH)
+- Accès Apache (`http.response.status_code`)
+- Métriques Metricbeat (CPU / mémoire)
 
-**Tâche (partie Windows — Winlogbeat §3.2)** :
-1. Ouvrez **Dashboard SIEM Lab Windows** (`/app/dashboards#/view/dash-siem-lab-windows`), ou créez un dashboard équivalent avec :
-   - Connexions réussies (`winlog.event_id: 4624`)
-   - Échecs d’authentification (`winlog.event_id: 4625`)
-   - Journal Security / répartition des canaux (`winlog.channel`)
-   - Hôte source (`host.name`)
-2. Vérifiez que les panneaux affichent des documents (data view `winlogbeat-*`).
-3. Alertes Kibana optionnelles (selon licence / version) : seuil d’échecs de connexion, CPU élevé.
+**Tâche (partie Windows — Winlogbeat §3.2)** — créez un dashboard Windows avec :
+- Connexions réussies (`winlog.event_id: 4624`)
+- Échecs d’authentification (`winlog.event_id: 4625`)
+- Journal Security / répartition des canaux (`winlog.channel`)
+- Hôte source (`host.name`)
+
+Vérifiez que les panneaux affichent des documents. Alertes Kibana (seuils) : optionnel selon licence / version.
 
 **Indice** : champs Windows `winlog.event_id`, `winlog.channel` ; champs Suricata ECS `rule.name`, `event.kind`.
 
@@ -1348,7 +1397,7 @@ Les adresses privées (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) ne reço
 - trafic **sortant** : `destination.geo.location` (la source est la VM, donc privée) ;
 - connexions **vers la VM** : `source.geo.location` (la destination est la VM, donc privée).
 
-Le dashboard **Dashboard SIEM — GeoIP** (`dash-siem-geoip`, fenêtre par défaut 24 h, data view `filebeat-*`) contient deux cartes et cinq tableaux : pays et IP de destination, pays et IP source, alertes `rule.name: "ESAIP-LAB-SSH-PROBE"`. URL : `/app/dashboards#/view/dash-siem-geoip`. Import : `instructor/kibana/dashboards-geoip.ndjson` (§4.3).
+Créez un dashboard GeoIP (data view `filebeat-*`, fenêtre ~24 h) avec au minimum : une carte destinations (`destination.geo.location`), une carte sources (`source.geo.location`), des tableaux pays/IP destination et source, et (si présent) les alertes `rule.name: "ESAIP-LAB-SSH-PROBE"`.
 
 Un site web hébergé derrière un CDN se géolocalise souvent aux États-Unis ou en France, pas dans le pays du nom de domaine. Le pays affiché est celui de l’adresse IP réellement contactée.
 
@@ -1404,7 +1453,7 @@ rule-files:
 
 Puis `sudo suricatasc -c reload-rules`. `$HOME_NET` contient déjà `10.0.0.0/8` et `172.16.0.0/12` : un SSH réel depuis le réseau du labo ne matche pas. Suricata peut prévenir que le sens « vers le client » est ignoré pour un simple SYN ; les SYN vers le serveur restent détectés.
 
-Depuis le poste de travail, forger l’adresse source exige les droits root (`nping` : `Mode TCP requires root privileges`), et la passerelle du campus peut jeter un paquet dont la source n’est pas celle du poste. Méthode validée en labo : émettre les SYN **depuis la VM SIEM**, sur le même LAN que la sonde, toujours uniquement vers `IP_SURVEILLEE` port 22. Trois SYN par adresse suffisent.
+Depuis le poste de travail, forger l’adresse source exige les droits root (`nping` : `Mode TCP requires root privileges`), et la passerelle du campus peut jeter un paquet dont la source n’est pas celle du poste. Émettez les SYN **depuis la VM SIEM**, sur le même LAN que la sonde, uniquement vers `IP_SURVEILLEE` port 22. Trois SYN par adresse suffisent.
 
 ```bash
 # Sur la VM SIEM, en root. Remplacez IP_SURVEILLEE.
@@ -1568,10 +1617,10 @@ sudo systemctl restart elasticsearch
 sudo journalctl -u elasticsearch -f
 
 # Lister les index
-curl http://localhost:9200/_cat/indices?v
+curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_cat/indices?v
 
 # Supprimer un index (attention !)
-curl -X DELETE http://localhost:9200/nom-index
+curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt -X DELETE https://localhost:9200/nom-index
 ```
 
 - `_cat/indices?v` : vue tabulaire des index (`v` = en-têtes de colonnes).
@@ -1676,7 +1725,7 @@ cd "C:\Program Files\Winlogbeat"
 **Symptômes** : Erreur "Unable to connect to Elasticsearch"
 
 **Solutions** :
-1. Vérifiez qu'Elasticsearch fonctionne : `curl http://localhost:9200`
+1. Vérifiez qu'Elasticsearch fonctionne : `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200`
 2. Vérifiez la configuration dans `kibana.yml` — la ligne `elasticsearch.hosts` doit être décommentée :
 
    ```bash
@@ -1739,7 +1788,7 @@ cd "C:\Program Files\Winlogbeat"
    sudo systemctl stop kibana
    
    # Supprimez les index Kibana (perte de toutes les configurations, visualisations, dashboards)
-   curl -X DELETE "http://localhost:9200/.kibana*"
+   curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt -X DELETE "https://localhost:9200/.kibana*"
    
    # Redémarrez Kibana
    sudo systemctl start kibana
@@ -1765,7 +1814,7 @@ cd "C:\Program Files\Winlogbeat"
 
 **Solutions** :
 1. Vérifiez que les Beats fonctionnent : `sudo systemctl status filebeat`
-2. Vérifiez les index dans Elasticsearch : `curl http://localhost:9200/_cat/indices?v`
+2. Vérifiez les index dans Elasticsearch : `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_cat/indices?v`
 3. Vérifiez la configuration des Beats
 4. Vérifiez les logs des Beats : `sudo journalctl -u filebeat -f`
 
@@ -1821,31 +1870,19 @@ cd "C:\Program Files\Winlogbeat"
 Avant de terminer, vérifiez que vous avez :
 
 - [ ] Elasticsearch installé et fonctionnel sur la VM SIEM
-- [ ] Kibana accessible depuis votre navigateur (`http://IP_SIEM:5601`)
+- [ ] Kibana accessible (`http://IP_SIEM:5601`) avec login `elastic`
+- [ ] Elasticsearch joignable en HTTPS avec CA + identifiants
 - [ ] Logstash configuré avec au moins un pipeline (test ou beats)
 - [ ] Filebeat sur la VM à surveiller : modules `system`, `apache`, `suricata`
 - [ ] Alertes Suricata visibles (`event.kind: "alert"`)
 - [ ] Traces SSH / auth visibles (`event.dataset: "system.auth"`)
 - [ ] Logs Apache visibles (`event.dataset: "apache.access"`)
 - [ ] Metricbeat collectant les métriques hôte (`metricbeat-*`)
-- [ ] Au moins le **Dashboard SIEM Lab Linux** (ou 3 visualisations + un dashboard équivalent)
-- [ ] **Dashboard SIEM — GeoIP** : points de destination (trafic sortant) et points source (connexions vers la VM)
+- [ ] Un dashboard Linux / sécurité que **vous** avez créé (au moins 3 visualisations)
+- [ ] Un dashboard GeoIP que **vous** avez créé : destinations (sortant) et sources (vers la VM)
 - [ ] Winlogbeat installé (même branche que le SIEM), service **Running**, data view `winlogbeat-*`
-- [ ] Au moins le **Dashboard SIEM Lab Windows** (ou équivalent 4624 / 4625 / canaux)
+- [ ] Un dashboard Windows que **vous** avez créé (4624 / 4625 / canaux)
 - [ ] Configurations et découvertes documentées (y compris l’IP source Windows → SIEM:9200)
-
----
-
-## Conclusion
-
-Félicitations ! Vous avez maintenant une solution SIEM complète opérationnelle. Vous pouvez :
-
-- Collecter des logs depuis différentes sources
-- Stocker et indexer les données dans Elasticsearch
-- Visualiser et analyser les données dans Kibana
-- Détecter des activités suspectes
-
-**Bon travail !**
 
 ---
 
