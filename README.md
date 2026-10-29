@@ -54,7 +54,7 @@ Le labo ESAIP utilise **deux VMs Linux** plus un **poste Windows** (navigateur K
 - **Stack** : Elastic **9.5.x** (dépôt `9.x`)
 - **Ressources** : **8 Go RAM**, **8 vCPU**, ~20 Go disque — si ~2 Go RAM, réduire le heap (§2.2) ; une VM SIEM < 4 Go est déconseillée dès que Kibana + Logstash tournent ensemble
 - **Accès** : SSH ; Kibana sur le port `5601` (HTTP) ; Elasticsearch sur `9200` (HTTPS)
-- **Heaps (8 Go)** : Elasticsearch `-Xms2g -Xmx2g` ; Logstash `-Xms512m -Xmx512m` ; `xpack.ml.enabled: false`
+- **Heaps (8 Go)** : Elasticsearch `-Xms2g -Xmx2g` ; Logstash laissé au défaut du paquet (`jvm.options`, 1 Go) ; `xpack.ml.enabled: false`
 
 #### VM à surveiller (Linux)
 - **Rôle** : sources de logs / métriques envoyées vers le SIEM
@@ -323,6 +323,7 @@ xpack.security.transport.ssl:
 ```
 
 **Notes** :
+- Le `elasticsearch.yml` du paquet a déjà, **décommentés**, `path.data: /var/lib/elasticsearch` et `path.logs: /var/log/elasticsearch`. Gardez-les. Le reste du fichier est commenté : ajoutez le bloc ci-dessus, ne réécrivez pas le fichier à vide.
 - Dans Elasticsearch 9.x, `http.host` complète / remplace l’ancien `network.host` pour l’API HTTP.
 - Sur un seul nœud, `discovery.type: single-node` évite `cluster.initial_master_nodes`.
 - Ne mettez **jamais** les mots de passe réels dans un dépôt Git.
@@ -413,7 +414,7 @@ sudo apt install -y kibana
 
 #### Étape 2 : Configuration de Kibana
 
-Copiez la CA Elasticsearch, puis éditez `kibana.yml` pour pointer vers HTTPS et le compte `kibana_system`.
+Copiez la CA Elasticsearch, puis éditez `kibana.yml` pour pointer vers HTTPS et le compte `kibana_system`. Ne remplacez pas le fichier entier.
 
 ```bash
 sudo mkdir -p /etc/kibana/certs
@@ -437,6 +438,23 @@ xpack.encryptedSavedObjects.encryptionKey: "ENC_KEY"
 xpack.reporting.encryptionKey: "ENC_KEY"
 xpack.security.encryptionKey: "ENC_KEY"
 ```
+
+Le paquet Kibana 9.5 a déjà deux réglages **actifs** (non commentés). **Gardez-les** :
+
+```yaml
+logging:
+  appenders:
+    file:
+      type: file
+      fileName: /var/log/kibana/kibana.log
+      layout:
+        type: json
+  root:
+    appenders: [default, file]
+pid.file: /run/kibana/kibana.pid
+```
+
+Dans le même fichier, `server.host`, `server.port` et `elasticsearch.hosts` sont **commentés** (`localhost`, `http://localhost:9200`). Décommentez-les et remplacez-les par le bloc HTTPS ci-dessus. Ajoutez les trois `encryptionKey` (absentes du paquet).
 
 Remplacez `KIBANA_SYSTEM_PASS` et `ENC_KEY` par les valeurs réelles, puis :
 
@@ -490,19 +508,9 @@ Connectez-vous avec l’utilisateur **`elastic`** et le mot de passe obtenu via 
 
 ### 2.4 Installation de Logstash
 
-#### Étape 1 : Installation de Java
+#### Étape 1 : JDK
 
-Logstash tourne sur la JVM. Installez un JRE OpenJDK avant le paquet Logstash.
-
-```bash
-sudo apt install -y default-jre
-```
-
-Confirmez que `java` est bien dans le PATH :
-
-```bash
-java -version
-```
+Le paquet Logstash 9 embarque son propre JDK (`/usr/share/logstash/jdk`). N’installez pas `default-jre` pour ce TP : le service n’utilise pas le `java` du système. Le heap reste celui de `/etc/logstash/jvm.options` (1 Go). Ce labo ne le modifie pas.
 
 ---
 
@@ -519,23 +527,22 @@ sudo apt install -y logstash
 
 #### Étape 3 : Configuration de base de Logstash
 
-Éditez la config principale pour pointer vers les répertoires de pipelines, logs et données internes.
+Le fichier `/etc/logstash/logstash.yml` du paquet est entièrement commenté. `/etc/logstash/pipelines.yml` pointe **déjà** vers les pipelines :
+
+```yaml
+- pipeline.id: main
+  path.config: "/etc/logstash/conf.d/*.conf"
+```
+
+Ne dupliquez pas `path.config` dans `logstash.yml`. Décommentez seulement les deux lignes déjà présentes :
+
+```yaml
+path.data: /var/lib/logstash
+path.logs: /var/log/logstash
+```
 
 ```bash
 sudo nano /etc/logstash/logstash.yml
-```
-
-Vérifiez / configurez les paramètres suivants :
-
-```yaml
-# Chemin des pipelines
-path.config: /etc/logstash/conf.d
-
-# Chemin des logs
-path.logs: /var/log/logstash
-
-# Chemin des données internes (important pour éviter les erreurs)
-path.data: /var/lib/logstash
 ```
 
 Créez les répertoires manquants et donnez-les à l’utilisateur `logstash` — sans cela, le service échoue souvent au démarrage.
@@ -849,7 +856,14 @@ output.elasticsearch:
   #password: "changeme"
 ```
 
-Plus bas, une section **`#output.logstash:`** contient aussi des lignes `#ssl.certificate_authorities: …` — **ne les décommentez pas** : ce n’est pas la sortie Elasticsearch, et Logstash n’est pas le chemin Beats → SIEM de ce TP.
+Plus bas, une section **`#output.logstash:`** contient aussi des lignes `#ssl.certificate_authorities: …` — **ne les décommentez pas** : ce n’est pas la sortie Elasticsearch, et les Beats de ce TP parlent à Elasticsearch, pas à Logstash (`:5044`).
+
+Conservez le reste du fichier paquet, en particulier :
+
+- `filebeat.inputs` : l’exemple `filestream` reste `enabled: false`. Si vous le passez à `true`, Filebeat envoie aussi `/var/log/*.log` en plus des modules.
+- `filebeat.config.modules` (`modules.d/*.yml`) : c’est ce qui charge system / apache / suricata.
+- `setup.template.settings` (`index.number_of_shards: 1`).
+- `processors` (au minimum `add_host_metadata`).
 
 **Ce qu’il faut faire** dans `output.elasticsearch` seulement :
 
@@ -911,6 +925,8 @@ sudo filebeat modules enable system apache suricata
     enabled: true
     var.paths: ["/var/log/apache2/error.log*"]
 ```
+
+Sans `var.paths`, le module Apache du paquet lit déjà `/var/log/apache2/` sur Debian. Les chemins ci-dessus ne servent que si les logs sont ailleurs. Suricata, lui, a besoin de `var.paths` vers `eve.json`.
 
 **Suricata** — `/etc/filebeat/modules.d/suricata.yml` :
 
@@ -1056,6 +1072,8 @@ Alternative manuelle : https://www.elastic.co/downloads/beats/winlogbeat — ext
 
 #### Étape 2 : Configuration (`winlogbeat.yml`)
 
+L’archive ZIP n’est pas sur les VMs Linux : le `winlogbeat.yml` livré suit le même modèle que Filebeat (`hosts: ["localhost:9200"]`, `#protocol: "https"`, auth commentée, lignes `#ssl` sous `#output.logstash`). Même geste que §3.1 : URL `https://`, compte `beats_writer`, bloc `ssl` sous `output.elasticsearch`. Ne décommentez pas le SSL Logstash.
+
 Éditez `C:\Program Files\Winlogbeat\winlogbeat.yml` (Bloc-notes ou VS Code) et configurez au minimum les journaux Application / System / Security et la sortie vers le SIEM :
 
 ```yaml
@@ -1181,6 +1199,8 @@ sudo apt install -y metricbeat
 #### Étape 2 : Configuration de base
 
 Même logique que Filebeat : le `metricbeat.yml` du paquet pointe vers `localhost:9200`, avec `#protocol: "https"` et auth commentés. Éditez **`output.elasticsearch`** seulement (ne décommentez pas le SSL sous `#output.logstash:`).
+
+Conservez `metricbeat.config.modules`, `setup.template.settings` et `processors`. N’ajoutez pas de second bloc `metricbeat.modules:` dans ce fichier : le module `system` vient de `modules.d/system.yml` (cpu, load, memory, network, process, `socket_summary`, filesystem). Un bloc en plus collecte les mêmes métriques une seconde fois.
 
 ```bash
 sudo nano /etc/metricbeat/metricbeat.yml
@@ -1943,6 +1963,5 @@ Avant de terminer, vérifiez que vous avez :
 - [ ] Winlogbeat installé (même branche que le SIEM), service **Running**, data view `winlogbeat-*`
 - [ ] Un dashboard Windows que **vous** avez créé (4624 / 4625 / canaux)
 - [ ] Configurations et découvertes documentées (y compris l’IP source Windows → SIEM:9200)
-
 *TP créé pour l'UE S10-3 - Sécurité des informations et management des événements*  
 *École ESAIP - Ingénieur Informatique et Réseaux*
