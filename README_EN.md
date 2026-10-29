@@ -596,7 +596,7 @@ output {
     user => "elastic"
     password => "${ELASTIC_PASS}"
     ssl_enabled => true
-    cacert => "/etc/elasticsearch/certs/http_ca.crt"
+    ssl_certificate_authorities => ["/etc/elasticsearch/certs/http_ca.crt"]
     index => "test-logs-%{+YYYY.MM.dd}"
   }
   stdout {
@@ -607,6 +607,7 @@ output {
 
 - `sincedb_path => "/dev/null"`: forget the previous read position, so the test can be repeated.
 - `index => "test-logs-%{+YYYY.MM.dd}"`: create an Elasticsearch index named with today's date.
+- On Logstash 9.x, the old `cacert` setting is **obsolete** and prevents the pipeline from starting. Use `ssl_certificate_authorities` (and `ssl_enabled => true`) instead.
 
 Create the file the pipeline reads, and make it writable for the test:
 
@@ -716,7 +717,7 @@ output {
     user => "elastic"
     password => "${ELASTIC_PASS}"
     ssl_enabled => true
-    cacert => "/etc/elasticsearch/certs/http_ca.crt"
+    ssl_certificate_authorities => ["/etc/elasticsearch/certs/http_ca.crt"]
     index => "apache-logs-%{+YYYY.MM.dd}"
   }
   stdout {
@@ -1719,7 +1720,27 @@ cd "C:\Program Files\Winlogbeat"
 .\winlogbeat.exe test config -c .\winlogbeat.yml
 ```
 
-### 6.2 Troubleshooting
+### 6.2 Logstash 9 — obsolete SSL options (Elasticsearch output)
+
+On Logstash 9.x these settings **prevent the plugin from starting**. This lab already uses the new names; do not put the old ones back from outdated tutorials.
+
+| Obsolete (do not use) | Replace with |
+| --- | --- |
+| `cacert` | `ssl_certificate_authorities` (list of PEM paths) |
+| `ssl => true` / `ssl => false` | `ssl_enabled => true` / `false` |
+| `ssl_certificate_verification` | `ssl_verification_mode` (`full` or `none`) |
+| `keystore` / `keystore_password` | `ssl_keystore_path` / `ssl_keystore_password` |
+| `truststore` / `truststore_password` | `ssl_truststore_path` / `ssl_truststore_password` |
+
+Still valid in this lab: `hosts`, `user`, `password`, `index`, `ssl_enabled`, `ssl_certificate_authorities`.
+
+**Do not confuse** with other tools (different syntax, still correct):
+- `curl --cacert …`
+- `elasticsearch-certutil --ca-cert …`
+- Beats / Winlogbeat: YAML `ssl:` block with `enabled`, `certificate_authorities`, `verification_mode`
+- Kibana: `elasticsearch.ssl.certificateAuthorities`, `elasticsearch.ssl.verificationMode`
+
+### 6.3 Troubleshooting
 
 #### Problem: Elasticsearch does not start
 
@@ -1893,8 +1914,3 @@ Before you finish, confirm that:
 - [ ] Winlogbeat is installed (same branch as the SIEM), the service is **Running**, data view `winlogbeat-*` exists
 - [ ] A Windows dashboard **you** built (4624 / 4625 / channels)
 - [ ] Configurations and findings are written down, including the Windows source IP towards SIEM:9200
-
----
-
-*Lab written for course unit S10-3 — Information security and event management*  
-*ESAIP — Computer Science and Networks*
