@@ -833,11 +833,7 @@ sudo apt install -y filebeat
 
 #### Step 2: Basic configuration (output to the SIEM)
 
-Edit the Filebeat config so events go to the **SIEM VM**, not to `localhost`.
-
-```bash
-sudo nano /etc/filebeat/filebeat.yml
-```
+The package ships a **default** `/etc/filebeat/filebeat.yml` that still points at `localhost:9200` over HTTP, with auth and TLS **commented out**. Start from that file: do not replace it wholesale — **edit the `output.elasticsearch` section**.
 
 On the monitored VM, fetch the CA from the SIEM first:
 
@@ -848,11 +844,39 @@ sudo cp /tmp/http_ca.crt /etc/filebeat/certs/http_ca.crt
 sudo cp /tmp/http_ca.crt /etc/metricbeat/certs/http_ca.crt
 ```
 
-Set `output.elasticsearch` to the **SIEM** over HTTPS:
+Then edit the config:
+
+```bash
+sudo nano /etc/filebeat/filebeat.yml
+```
+
+**What the stock file looks like** (landmarks to find, Elastic 9.x):
 
 ```yaml
 output.elasticsearch:
+  hosts: ["localhost:9200"]
+  preset: balanced
+  #protocol: "https"
+  #username: "elastic"
+  #password: "changeme"
+```
+
+Further down, a **`#output.logstash:`** section also has `#ssl.certificate_authorities: …` lines — **do not uncomment those**. That is not the Elasticsearch output, and Beats → SIEM in this lab does not go through Logstash.
+
+**What to change** under `output.elasticsearch` only:
+
+1. Set `hosts` to the SIEM **HTTPS** URL (`https://` in the URL is enough; you can leave `#protocol: "https"` commented).
+2. Uncomment and set `username` / `password` (`beats_writer` / lab password — **not** `elastic`).
+3. **Add** an `ssl:` block (missing under `output.elasticsearch` in the package YAML) so Filebeat trusts the lab CA.
+
+Expected result:
+
+```yaml
+output.elasticsearch:
+  # Array of hosts to connect to.
   hosts: ["https://IP_SIEM:9200"]
+  preset: balanced
+  #protocol: "https"   # not needed if hosts already starts with https://
   username: "beats_writer"
   password: "BEATS_PASS"
   ssl:
@@ -861,8 +885,11 @@ output.elasticsearch:
     verification_mode: full
 ```
 
-Check with `sudo filebeat test output` — expect `TLS... handshake... OK` then `talk to server... OK`.
+- Without `https://` (or without `protocol: "https"`), Filebeat uses plain **HTTP** → fails against ES 9 with TLS.
+- Without the `ssl` + CA block, the handshake often fails (*x509: certificate signed by unknown authority*).
+- `verification_mode: full` requires the IP/hostname in `hosts` to match a SAN on the node certificate (this lab generates a cert with `IP_SIEM`).
 
+Check with `sudo filebeat test output` — expect `TLS... handshake... OK` then `talk to server... OK`.
 #### Step 3: Enable modules (system, Apache, Suricata)
 
 Enable the Filebeat modules that already know how to read SSH/auth logs, Apache and Suricata (EVE JSON). You do not have to type the paths by hand.
@@ -1164,13 +1191,13 @@ sudo apt install -y metricbeat
 
 #### Step 2: Basic configuration
 
-Edit the config so the output points at Elasticsearch on the SIEM VM.
+Same idea as Filebeat: the package `metricbeat.yml` points at `localhost:9200`, with `#protocol: "https"` and auth commented. Edit **`output.elasticsearch` only** (do not uncomment SSL under `#output.logstash:`).
 
 ```bash
 sudo nano /etc/metricbeat/metricbeat.yml
 ```
 
-Set the output to the SIEM:
+Same CA / user as Filebeat:
 
 ```yaml
 output.elasticsearch:
@@ -1183,6 +1210,7 @@ output.elasticsearch:
     verification_mode: full
 ```
 
+Check with `sudo metricbeat test output`.
 #### Step 3: Enable the system module
 
 Enable the `system` module (host metrics). Without it, Metricbeat runs but sends almost nothing useful for the lab dashboard.
@@ -1840,6 +1868,18 @@ Still valid in this lab: `hosts`, `user`, `password`, `index`, `ssl_enabled`, `s
 
 **Note**: "Starting saved objects migrations" with no completion line yet is normal. Migrations can take several minutes. Wait, and keep an eye on the logs.
 
+#### Problem: `filebeat test output` fails (TLS / HTTPS)
+
+**Symptoms**: `connection... ERROR`, `x509: …`, or plain HTTP while ES expects HTTPS.
+
+**Common causes** (**default package** YAML):
+1. `hosts` still `localhost:9200` without `https://`, and `#protocol: "https"` still commented
+2. `#username` / `#password` still commented, or using `elastic` instead of `beats_writer`
+3. Missing `ssl:` / CA under `output.elasticsearch` (stock `#ssl.certificate_authorities` lines sit under **Logstash**, not Elasticsearch)
+4. Missing CA file: `/etc/filebeat/certs/http_ca.crt`
+
+**What to try**: redo §3.1 step 2; recopy the CA; run `sudo filebeat test output` until `handshake... OK` and `talk to server... OK`.
+
 #### Problem: logs do not show up in Kibana
 
 **Symptoms**: Discover is empty.
@@ -1914,3 +1954,6 @@ Before you finish, confirm that:
 - [ ] Winlogbeat is installed (same branch as the SIEM), the service is **Running**, data view `winlogbeat-*` exists
 - [ ] A Windows dashboard **you** built (4624 / 4625 / channels)
 - [ ] Configurations and findings are written down, including the Windows source IP towards SIEM:9200
+
+*Lab written for course unit S10-3 — Information security and event management*  
+*ESAIP — Computer Science and Networks*
