@@ -583,7 +583,7 @@ output {
     user => "elastic"
     password => "${ELASTIC_PASS}"
     ssl_enabled => true
-    cacert => "/etc/elasticsearch/certs/http_ca.crt"
+    ssl_certificate_authorities => ["/etc/elasticsearch/certs/http_ca.crt"]
     index => "test-logs-%{+YYYY.MM.dd}"
   }
   stdout {
@@ -592,7 +592,7 @@ output {
 }
 ```
 
-Avant de démarrer Logstash, copiez la CA si besoin (`sudo cp /etc/elasticsearch/certs/http_ca.crt /etc/logstash/http_ca.crt` et adaptez `cacert`) et substituez le mot de passe `elastic` (évitez de laisser un secret en clair durablement — labo uniquement).
+Avant de démarrer Logstash, copiez la CA si besoin (`sudo cp /etc/elasticsearch/certs/http_ca.crt /etc/logstash/http_ca.crt` et adaptez `ssl_certificate_authorities`) et substituez le mot de passe `elastic` (évitez de laisser un secret en clair durablement — labo uniquement). Sur Logstash 9.x, l’ancien réglage `cacert` est **obsolète** : le pipeline refuse de démarrer s’il est encore présent.
 
 - `sincedb_path => "/dev/null"` : ignore la position de lecture précédente (utile pour un test reproductible).
 - `index => "test-logs-%{+YYYY.MM.dd}"` : crée un index Elasticsearch daté du jour.
@@ -705,7 +705,7 @@ output {
     user => "elastic"
     password => "${ELASTIC_PASS}"
     ssl_enabled => true
-    cacert => "/etc/elasticsearch/certs/http_ca.crt"
+    ssl_certificate_authorities => ["/etc/elasticsearch/certs/http_ca.crt"]
     index => "apache-logs-%{+YYYY.MM.dd}"
   }
   stdout {
@@ -1708,7 +1708,27 @@ cd "C:\Program Files\Winlogbeat"
 .\winlogbeat.exe test config -c .\winlogbeat.yml
 ```
 
-### 6.2 Dépannage
+### 6.2 Logstash 9 — options SSL obsolètes (output Elasticsearch)
+
+Sur Logstash 9.x, ces réglages **refusent le démarrage** du plugin. Le TP utilise déjà les nouveaux noms ; ne les remettez pas « comme dans un vieux tuto ».
+
+| Obsolète (ne plus utiliser) | Remplacer par |
+| --- | --- |
+| `cacert` | `ssl_certificate_authorities` (liste de chemins PEM) |
+| `ssl => true` / `ssl => false` | `ssl_enabled => true` / `false` |
+| `ssl_certificate_verification` | `ssl_verification_mode` (`full` ou `none`) |
+| `keystore` / `keystore_password` | `ssl_keystore_path` / `ssl_keystore_password` |
+| `truststore` / `truststore_password` | `ssl_truststore_path` / `ssl_truststore_password` |
+
+Toujours valides dans ce TP : `hosts`, `user`, `password`, `index`, `ssl_enabled`, `ssl_certificate_authorities`.
+
+**Ne pas confondre** avec d’autres outils (syntaxe différente, toujours correcte) :
+- `curl --cacert …`
+- `elasticsearch-certutil --ca-cert …`
+- Beats / Winlogbeat : bloc YAML `ssl:` avec `enabled`, `certificate_authorities`, `verification_mode`
+- Kibana : `elasticsearch.ssl.certificateAuthorities`, `elasticsearch.ssl.verificationMode`
+
+### 6.3 Dépannage
 
 #### Problème : Elasticsearch ne démarre pas
 
@@ -1883,8 +1903,6 @@ Avant de terminer, vérifiez que vous avez :
 - [ ] Winlogbeat installé (même branche que le SIEM), service **Running**, data view `winlogbeat-*`
 - [ ] Un dashboard Windows que **vous** avez créé (4624 / 4625 / canaux)
 - [ ] Configurations et découvertes documentées (y compris l’IP source Windows → SIEM:9200)
-
----
 
 *TP créé pour l'UE S10-3 - Sécurité des informations et management des événements*  
 *École ESAIP - Ingénieur Informatique et Réseaux*
