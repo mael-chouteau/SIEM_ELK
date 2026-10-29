@@ -821,11 +821,7 @@ sudo apt install -y filebeat
 
 #### Étape 2 : Configuration de base (sortie vers le SIEM)
 
-Éditez la config Filebeat pour envoyer les événements vers la **VM SIEM**, pas vers `localhost`.
-
-```bash
-sudo nano /etc/filebeat/filebeat.yml
-```
+Le paquet installe un `/etc/filebeat/filebeat.yml` **par défaut** qui pointe encore vers `localhost:9200` en HTTP, avec auth et TLS **commentés**. Vous partez de ce fichier : ne le remplacez pas en entier, **modifiez la section `output.elasticsearch`**.
 
 Sur la VM à surveiller, récupérez d’abord la CA depuis le SIEM :
 
@@ -836,11 +832,39 @@ sudo cp /tmp/http_ca.crt /etc/filebeat/certs/http_ca.crt
 sudo cp /tmp/http_ca.crt /etc/metricbeat/certs/http_ca.crt
 ```
 
-Configurez la section `output.elasticsearch` pour cibler **le SIEM** en HTTPS :
+Éditez ensuite la config :
+
+```bash
+sudo nano /etc/filebeat/filebeat.yml
+```
+
+**Ce que le fichier stock contient** (repères à chercher, Elastic 9.x) :
 
 ```yaml
 output.elasticsearch:
+  hosts: ["localhost:9200"]
+  preset: balanced
+  #protocol: "https"
+  #username: "elastic"
+  #password: "changeme"
+```
+
+Plus bas, une section **`#output.logstash:`** contient aussi des lignes `#ssl.certificate_authorities: …` — **ne les décommentez pas** : ce n’est pas la sortie Elasticsearch, et Logstash n’est pas le chemin Beats → SIEM de ce TP.
+
+**Ce qu’il faut faire** dans `output.elasticsearch` seulement :
+
+1. Remplacer `hosts` par l’URL **HTTPS** du SIEM (`https://` dans l’URL suffit ; vous pouvez laisser `#protocol: "https"` commenté).
+2. Décommenter et adapter `username` / `password` (`beats_writer` / mot de passe du labo — **pas** `elastic`).
+3. **Ajouter** un bloc `ssl:` (absent du YAML paquet sous `output.elasticsearch`) pour faire confiance à la CA du labo.
+
+Résultat attendu :
+
+```yaml
+output.elasticsearch:
+  # Array of hosts to connect to.
   hosts: ["https://IP_SIEM:9200"]
+  preset: balanced
+  #protocol: "https"   # inutile si hosts commence déjà par https://
   username: "beats_writer"
   password: "BEATS_PASS"
   ssl:
@@ -849,8 +873,11 @@ output.elasticsearch:
     verification_mode: full
 ```
 
-Vérifiez : `sudo filebeat test output` — attendu : `TLS... handshake... OK` puis `talk to server... OK`.
+- Sans `https://` (ou sans `protocol: "https"`), Filebeat tente du **HTTP** clair → échec vers ES 9 en TLS.
+- Sans le bloc `ssl` + CA, le handshake échoue souvent (*x509: certificate signed by unknown authority*).
+- `verification_mode: full` exige que l’IP/hostname dans `hosts` soit dans le SAN du certificat nœud (le TP a généré un cert avec `IP_SIEM`).
 
+Vérifiez : `sudo filebeat test output` — attendu : `TLS... handshake... OK` puis `talk to server... OK`.
 #### Étape 3 : Activation des modules (système, Apache, Suricata)
 
 Activez les modules Filebeat qui savent lire les logs SSH/auth, Apache et Suricata (EVE JSON) sans écrire les chemins à la main.
@@ -1153,13 +1180,13 @@ sudo apt install -y metricbeat
 
 #### Étape 2 : Configuration de base
 
-Éditez la config pour pointer la sortie vers Elasticsearch sur la VM SIEM.
+Même logique que Filebeat : le `metricbeat.yml` du paquet pointe vers `localhost:9200`, avec `#protocol: "https"` et auth commentés. Éditez **`output.elasticsearch`** seulement (ne décommentez pas le SSL sous `#output.logstash:`).
 
 ```bash
 sudo nano /etc/metricbeat/metricbeat.yml
 ```
 
-Configurez la sortie vers le SIEM (même CA / utilisateur que Filebeat) :
+Même CA / utilisateur que Filebeat :
 
 ```yaml
 output.elasticsearch:
@@ -1172,6 +1199,7 @@ output.elasticsearch:
     verification_mode: full
 ```
 
+Vérifiez : `sudo metricbeat test output`.
 #### Étape 3 : Activation des modules système
 
 Activez le module `system` (métriques hôte) — sans cela, Metricbeat tourne mais n’envoie presque rien d’utile pour le dashboard labo.
@@ -1827,6 +1855,18 @@ Toujours valides dans ce TP : `hosts`, `user`, `password`, `index`, `ssl_enabled
    Si la mémoire est saturée, les migrations peuvent être très lentes. Considérez réduire le heap d'Elasticsearch.
 
 **Note** : Si vous voyez dans les logs "Starting saved objects migrations" mais pas de message de fin, c'est normal - les migrations peuvent prendre plusieurs minutes. Patientez et surveillez les logs.
+
+#### Problème : `filebeat test output` échoue (TLS / HTTPS)
+
+**Symptômes** : `connection... ERROR`, `x509: …`, ou tentative en HTTP alors qu’ES écoute en HTTPS.
+
+**Causes fréquentes** (YAML **paquet par défaut**) :
+1. `hosts` encore à `localhost:9200` sans `https://`, et `#protocol: "https"` toujours commenté
+2. `#username` / `#password` encore commentés, ou compte `elastic` au lieu de `beats_writer`
+3. Bloc `ssl:` / CA manquant sous `output.elasticsearch` (les lignes `#ssl.certificate_authorities` du fichier stock sont sous **Logstash**, pas sous Elasticsearch)
+4. Fichier CA absent : `/etc/filebeat/certs/http_ca.crt`
+
+**Solutions** : reprendre §3.1 étape 2 ; recopier la CA ; `sudo filebeat test output` jusqu’à `handshake... OK` et `talk to server... OK`.
 
 #### Problème : Les logs n'apparaissent pas dans Kibana
 
