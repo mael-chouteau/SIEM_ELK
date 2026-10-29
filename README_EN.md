@@ -56,7 +56,7 @@ The ESAIP lab uses **two Linux VMs** plus a **Windows machine** (Kibana in the b
 - **Stack**: Elastic **9.5.x** (repository `9.x`)
 - **Resources**: **8 GB RAM**, **8 vCPU**, ~20 GB disk — if ~2 GB RAM, lower the heap (§2.2); under 4 GB with Kibana + Logstash is not recommended
 - **Access**: SSH; Kibana on port `5601` (HTTP); Elasticsearch on `9200` (HTTPS)
-- **Heaps (8 GB)**: Elasticsearch `-Xms2g -Xmx2g`; Logstash `-Xms512m -Xmx512m`; `xpack.ml.enabled: false`
+- **Heaps (8 GB)**: Elasticsearch `-Xms2g -Xmx2g`; Logstash left at the package default (`jvm.options`, 1 GB); `xpack.ml.enabled: false`
 
 #### Monitored VM (Linux)
 - **Role**: log and metric sources sent to the SIEM
@@ -324,6 +324,7 @@ xpack.security.transport.ssl:
 ```
 
 **Notes**:
+- The package `elasticsearch.yml` already has **uncommented** `path.data: /var/lib/elasticsearch` and `path.logs: /var/log/elasticsearch`. Keep them. The rest of the file is commented: add the block above, do not blank the file.
 - On Elasticsearch 9.x, `http.host` is the HTTP API bind setting.
 - On a single node, `discovery.type: single-node` avoids `cluster.initial_master_nodes`.
 - Never commit real passwords to Git.
@@ -414,7 +415,7 @@ sudo apt install -y kibana
 
 #### Step 2: Configure Kibana
 
-Copy the Elasticsearch CA, then point Kibana at HTTPS and the `kibana_system` account.
+Copy the Elasticsearch CA, then point Kibana at HTTPS and the `kibana_system` account. Do not replace the whole file.
 
 ```bash
 sudo mkdir -p /etc/kibana/certs
@@ -438,6 +439,23 @@ xpack.encryptedSavedObjects.encryptionKey: "ENC_KEY"
 xpack.reporting.encryptionKey: "ENC_KEY"
 xpack.security.encryptionKey: "ENC_KEY"
 ```
+
+The Kibana 9.5 package already has two **active** settings. **Keep them**:
+
+```yaml
+logging:
+  appenders:
+    file:
+      type: file
+      fileName: /var/log/kibana/kibana.log
+      layout:
+        type: json
+  root:
+    appenders: [default, file]
+pid.file: /run/kibana/kibana.pid
+```
+
+In the same file, `server.host`, `server.port` and `elasticsearch.hosts` are **commented** (`localhost`, `http://localhost:9200`). Uncomment them and replace them with the HTTPS block above. Add the three `encryptionKey` lines (they are not in the package).
 
 Replace `KIBANA_SYSTEM_PASS` and `ENC_KEY` with real values, then:
 
@@ -503,19 +521,9 @@ There is no login on this lab: security is disabled. You should land on the Kiba
 
 ### 2.4 Install Logstash
 
-#### Step 1: Install Java
+#### Step 1: JDK
 
-Logstash runs on the JVM. Install an OpenJDK JRE before the Logstash package.
-
-```bash
-sudo apt install -y default-jre
-```
-
-Confirm `java` is on the `PATH`:
-
-```bash
-java -version
-```
+The Logstash 9 package ships its own JDK (`/usr/share/logstash/jdk`). Do not install `default-jre` for this lab: the service does not use the system `java`. The heap stays at `/etc/logstash/jvm.options` (1 GB). This lab does not change it.
 
 ---
 
@@ -532,23 +540,22 @@ sudo apt install -y logstash
 
 #### Step 3: Basic Logstash configuration
 
-Edit the main config so it points at the pipeline, log and data directories.
+The package `/etc/logstash/logstash.yml` is fully commented. `/etc/logstash/pipelines.yml` **already** points at the pipelines:
+
+```yaml
+- pipeline.id: main
+  path.config: "/etc/logstash/conf.d/*.conf"
+```
+
+Do not copy `path.config` into `logstash.yml`. Uncomment only the two lines that are already there:
+
+```yaml
+path.data: /var/lib/logstash
+path.logs: /var/log/logstash
+```
 
 ```bash
 sudo nano /etc/logstash/logstash.yml
-```
-
-Check or set:
-
-```yaml
-# Pipeline directory
-path.config: /etc/logstash/conf.d
-
-# Log directory
-path.logs: /var/log/logstash
-
-# Internal data (needed to avoid startup errors)
-path.data: /var/lib/logstash
 ```
 
 Create any missing directories and give them to the `logstash` user. Without that, the service often fails at startup.
@@ -861,7 +868,14 @@ output.elasticsearch:
   #password: "changeme"
 ```
 
-Further down, a **`#output.logstash:`** section also has `#ssl.certificate_authorities: …` lines — **do not uncomment those**. That is not the Elasticsearch output, and Beats → SIEM in this lab does not go through Logstash.
+Further down, a **`#output.logstash:`** section also has `#ssl.certificate_authorities: …` lines — **do not uncomment those**. That is not the Elasticsearch output, and Beats in this lab talk to Elasticsearch, not to Logstash (`:5044`).
+
+Keep the rest of the package file, in particular:
+
+- `filebeat.inputs`: the sample `filestream` stays `enabled: false`. If you set it to `true`, Filebeat also ships `/var/log/*.log` on top of the modules.
+- `filebeat.config.modules` (`modules.d/*.yml`): this is what loads system / apache / suricata.
+- `setup.template.settings` (`index.number_of_shards: 1`).
+- `processors` (at least `add_host_metadata`).
 
 **What to change** under `output.elasticsearch` only:
 
@@ -923,6 +937,8 @@ sudo filebeat modules enable system apache suricata
     enabled: true
     var.paths: ["/var/log/apache2/error.log*"]
 ```
+
+Without `var.paths`, the package Apache module already reads `/var/log/apache2/` on Debian. The paths above matter only if the logs live elsewhere. Suricata does need `var.paths` pointing at `eve.json`.
 
 **Suricata** — `/etc/filebeat/modules.d/suricata.yml`:
 
@@ -1068,6 +1084,8 @@ Manual alternative: https://www.elastic.co/downloads/beats/winlogbeat — extrac
 
 #### Step 2: Configuration (`winlogbeat.yml`)
 
+The ZIP is not on the Linux VMs. The shipped `winlogbeat.yml` follows the same pattern as Filebeat (`hosts: ["localhost:9200"]`, `#protocol: "https"`, commented auth, `#ssl` lines under `#output.logstash`). Same edit as §3.1: `https://` URL, `beats_writer`, an `ssl` block under `output.elasticsearch`. Do not uncomment the Logstash SSL lines.
+
 Edit `C:\Program Files\Winlogbeat\winlogbeat.yml` (Notepad or VS Code). At minimum, collect Application, System and Security, and send them to the SIEM:
 
 ```yaml
@@ -1192,6 +1210,8 @@ sudo apt install -y metricbeat
 #### Step 2: Basic configuration
 
 Same idea as Filebeat: the package `metricbeat.yml` points at `localhost:9200`, with `#protocol: "https"` and auth commented. Edit **`output.elasticsearch` only** (do not uncomment SSL under `#output.logstash:`).
+
+Keep `metricbeat.config.modules`, `setup.template.settings` and `processors`. Do not add a second `metricbeat.modules:` block in this file: the `system` module comes from `modules.d/system.yml` (cpu, load, memory, network, process, `socket_summary`, filesystem). An extra block collects the same metrics twice.
 
 ```bash
 sudo nano /etc/metricbeat/metricbeat.yml
@@ -1954,6 +1974,5 @@ Before you finish, confirm that:
 - [ ] Winlogbeat is installed (same branch as the SIEM), the service is **Running**, data view `winlogbeat-*` exists
 - [ ] A Windows dashboard **you** built (4624 / 4625 / channels)
 - [ ] Configurations and findings are written down, including the Windows source IP towards SIEM:9200
-
 *Lab written for course unit S10-3 — Information security and event management*  
 *ESAIP — Computer Science and Networks*
