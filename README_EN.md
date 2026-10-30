@@ -923,14 +923,13 @@ sudo filebeat modules enable system apache suricata
 
 `var.use_journald: true`: Filebeat reads the systemd journal (auth/authpriv facilities for `auth`, the others for `syslog`) instead of `/var/log/auth.log` and `/var/log/syslog`.
 
-The packaged service runs as root and can read the journal. If it runs as the `filebeat` user, add that user to the journal group, then restart:
+The Debian package does not create a `filebeat` user. The service runs as root (empty `User=` in the systemd unit) and reads the journal without an extra group.
 
 ```bash
-sudo usermod -aG systemd-journal filebeat
 sudo systemctl restart filebeat
 ```
 
-Check: `sudo journalctl -u filebeat -n 30` must not show a harvester on `/var/log/auth.log`. A `permission denied` error on the journal means the service account is not in `systemd-journal`.
+Check: `sudo journalctl -u filebeat -n 30` must show `Input 'journald' starting` (`system-auth`, `system-syslog`), not a harvester on `/var/log/auth.log`.
 
 **Apache** — `/etc/filebeat/modules.d/apache.yml`:
 
