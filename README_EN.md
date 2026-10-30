@@ -1,77 +1,79 @@
-# TP : Mise en place d'une solution SIEM avec ELK Stack
+# Lab: Deploy a SIEM with the ELK Stack
 
-**UE S10-3 - Sécurité des informations et management des événements**  
-**Travaux Pratiques - Travail individuel**
+**Course unit S10-3 — Information security and event management**  
+**Practical work — individual**
 
-Version anglaise : [README_EN.md](README_EN.md).
+French version: [README.md](README.md).
 
----
-
-## Table des matières
-
-1. [Contexte et objectifs](#1-contexte-et-objectifs)
-2. [Partie 1 : Installation de la stack ELK](#2-partie-1--installation-de-la-stack-elk)
-3. [Partie 2 : Configuration des agents Beats](#3-partie-2--configuration-des-agents-beats)
-4. [Partie 3 : Visualisation et analyse dans Kibana](#4-partie-3--visualisation-et-analyse-dans-kibana)
-5. [Partie 4 : Cas d'usage pratique](#5-partie-4--cas-dusage-pratique)
-6. [Annexes](#6-annexes)
+You name your own Kibana dashboards and visualisations; titles in this handout are suggestions only.
 
 ---
 
-## 1. Contexte et objectifs
+## Contents
 
-### 1.1 Présentation du TP
+1. [Context and objectives](#1-context-and-objectives)
+2. [Part 1: Install the ELK stack](#2-part-1-install-the-elk-stack)
+3. [Part 2: Configure Beats agents](#3-part-2-configure-beats-agents)
+4. [Part 3: Visualise and analyse in Kibana](#4-part-3-visualise-and-analyse-in-kibana)
+5. [Part 4: Practical case](#5-part-4-practical-case)
+6. [Appendices](#6-appendices)
 
-Ce TP vous permettra de mettre en pratique les concepts vus en cours en installant et configurant une solution SIEM complète basée sur la **stack ELK** (Elasticsearch, Logstash, Kibana).
+---
 
-Vous allez :
-- Installer et configurer la stack ELK sur une VM SIEM Debian
-- Configurer Suricata, Apache, Filebeat et Metricbeat sur une VM Linux à surveiller
-- Configurer Winlogbeat sur un poste Windows pour envoyer les journaux vers le SIEM
-- Créer des visualisations et des dashboards dans Kibana
-- Analyser des événements de sécurité réels (alertes IDS, auth SSH, accès web, métriques, événements Windows)
+## 1. Context and objectives
 
-### 1.2 Objectifs d'apprentissage
+### 1.1 What this lab is
 
-À l'issue de ce TP, vous serez capable de :
+This lab puts the lecture into practice: you install and configure a full SIEM based on the **ELK stack** (Elasticsearch, Logstash, Kibana).
 
-- Installer et configurer Elasticsearch, Logstash et Kibana
-- Mettre en place TLS (HTTP et transport) et l’authentification entre les composants
-- Optimiser Elasticsearch pour fonctionner avec des ressources limitées
-- Configurer Filebeat pour collecter les logs système
-- Configurer Winlogbeat pour collecter les événements Windows
-- Configurer Metricbeat pour collecter les métriques système
-- Créer des visualisations et des dashboards dans Kibana
-- Analyser des logs pour détecter des activités suspectes
+You will:
+- Install and configure the ELK stack on a Debian SIEM VM
+- Configure Suricata, Apache, Filebeat and Metricbeat on a Linux VM you are monitoring
+- Configure Winlogbeat on a Windows machine so its logs reach the SIEM
+- Build visualisations and dashboards in Kibana
+- Analyse real security events (IDS alerts, SSH auth, web access, metrics, Windows events)
 
-### 1.3 Environnement technique
+### 1.2 Learning outcomes
 
-Le labo ESAIP utilise **deux VMs Linux** plus un **poste Windows** (navigateur Kibana et Winlogbeat).
+By the end of this lab you will be able to:
 
-#### VM SIEM (collecteur ELK)
-- **Rôle** : Elasticsearch, Kibana, Logstash
-- **OS** : Debian 13 (Trixie)
-- **Stack** : Elastic **9.5.x** (dépôt `9.x`)
-- **Ressources** : **8 Go RAM**, **8 vCPU**, ~20 Go disque — si ~2 Go RAM, réduire le heap (§2.2) ; une VM SIEM < 4 Go est déconseillée dès que Kibana + Logstash tournent ensemble
-- **Accès** : SSH ; Kibana sur le port `5601` (HTTP) ; Elasticsearch sur `9200` (HTTPS)
-- **Heaps (8 Go)** : Elasticsearch `-Xms2g -Xmx2g` ; Logstash laissé au défaut du paquet (`jvm.options`, 1 Go) ; `xpack.ml.enabled: false`
+- Install and configure Elasticsearch, Logstash and Kibana
+- Set up TLS (HTTP and transport) and authentication between components
+- Tune Elasticsearch for a machine with limited RAM
+- Configure Filebeat to collect system logs
+- Configure Winlogbeat to collect Windows events
+- Configure Metricbeat to collect system metrics
+- Build visualisations and dashboards in Kibana
+- Read logs closely enough to spot suspicious activity
 
-#### VM à surveiller (Linux)
-- **Rôle** : sources de logs / métriques envoyées vers le SIEM
-- **OS** : Debian 13 — **~2 Go RAM**, **2 vCPU**
-- **Services cibles** : Suricata (alertes), SSH (journald), Apache, Metricbeat
-- **Agents** : Filebeat + Metricbeat → `https://IP_SIEM:9200` (TLS + utilisateur `beats_writer`)
+### 1.3 Lab environment
 
-#### Poste Windows
-- Accès à Kibana : `http://IP_SIEM:5601` (login `elastic`)
-- **Winlogbeat** (même branche que le SIEM) : journaux Application / System / Security → Elasticsearch `https://IP_SIEM:9200`
-- Vérifiez quelle interface Windows atteint réellement le SIEM (`curl` + `Get-NetTCPConnection`) — un poste multi-homed peut joindre le labo via Ethernet alors que la Wi-Fi sert à autre chose
+The ESAIP lab uses **two Linux VMs** plus a **Windows machine** (Kibana in the browser, and Winlogbeat).
 
-#### Architecture réseau
+#### SIEM VM (ELK collector)
+- **Role**: Elasticsearch, Kibana, Logstash
+- **OS**: Debian 13 (Trixie)
+- **Stack**: Elastic **9.5.x** (repository `9.x`)
+- **Resources**: **8 GB RAM**, **8 vCPU**, ~20 GB disk — if ~2 GB RAM, lower the heap (§2.2); under 4 GB with Kibana + Logstash is not recommended
+- **Access**: SSH; Kibana on port `5601` (HTTP); Elasticsearch on `9200` (HTTPS)
+- **Heaps (8 GB)**: Elasticsearch `-Xms2g -Xmx2g`; Logstash left at the package default (`jvm.options`, 1 GB); `xpack.ml.enabled: false`
+
+#### Monitored VM (Linux)
+- **Role**: log and metric sources sent to the SIEM
+- **OS**: Debian 13 — **~2 GB RAM**, **2 vCPU**
+- **Target services**: Suricata (alerts), SSH (journald), Apache, Metricbeat
+- **Agents**: Filebeat + Metricbeat → `https://IP_SIEM:9200` (TLS + `beats_writer` user)
+
+#### Windows machine
+- Kibana: `http://IP_SIEM:5601` (login `elastic`)
+- **Winlogbeat** (same branch as the SIEM): Application / System / Security logs → Elasticsearch `https://IP_SIEM:9200`
+- Check which Windows interface actually reaches the SIEM (`curl` + `Get-NetTCPConnection`). A multi-homed PC can reach the lab over Ethernet while Wi-Fi is used for something else.
+
+#### Network layout
 
 ```
 ┌──────────────────┐         ┌──────────────────────┐
-│  VM à surveiller │         │  VM SIEM (ELK)       │
+│  Monitored VM    │         │  SIEM VM (ELK)       │
 │  (Debian 13)     │         │  (Debian 13)         │
 │                  │         │                      │
 │  - Suricata      │──logs──▶│  - Elasticsearch     │
@@ -82,85 +84,85 @@ Le labo ESAIP utilise **deux VMs Linux** plus un **poste Windows** (navigateur K
 └──────────────────┘         └──────────▲───────────┘
                                         │
 ┌──────────────────┐                    │
-│  Poste Windows   │──── Winlogbeat ────┘
-│  - navigateur    │     :9200
+│  Windows machine │──── Winlogbeat ────┘
+│  - browser       │     :9200
 │  - Winlogbeat    │
 └──────────────────┘
-         (réseau labo)
+         (lab network)
 ```
 
-### 1.4 Prérequis
+### 1.4 Prerequisites
 
-Avant de commencer, assurez-vous d'avoir :
+Before you start, make sure you have:
 
-- Accès SSH à la VM SIEM **et** à la VM à surveiller
-- Droits administrateur (sudo) sur les deux VMs
-- Accès réseau entre les deux VMs (port `9200` vers le SIEM) et depuis votre PC vers Kibana (`5601`)
-- Navigateur web moderne (Chrome, Firefox, Edge)
-- Connaissances de base en Linux (commandes, édition de fichiers)
+- SSH access to the SIEM VM **and** the monitored VM
+- Administrator rights (`sudo`) on both VMs
+- Network access between the two VMs (port `9200` towards the SIEM) and from your PC to Kibana (`5601`)
+- A current browser (Chrome, Firefox, Edge)
+- Basic Linux skills (commands, editing files)
 
-### 1.5 Durée estimée
+### 1.5 Estimated time
 
-- **Partie 1** : 2-3 heures
-- **Partie 2** : 2-3 heures
-- **Partie 3** : 1-2 heures
-- **Partie 4** : 1-2 heures
+- **Part 1**: 2–3 hours
+- **Part 2**: 2–3 hours
+- **Part 3**: 1–2 hours
+- **Part 4**: 1–2 hours
 
-**Total** : 6-10 heures de travail
+**Total**: 6–10 hours of work
 
 ---
 
-## 2. Partie 1 : Installation de la stack ELK
+## 2. Part 1: Install the ELK stack
 
-### 2.1 Prérequis et vérification de l'environnement
+### 2.1 Check the environment
 
-#### Étape 1 : Connexion à la VM SIEM
+#### Step 1: Connect to the SIEM VM
 
-Ouvrez une session SSH sur la **VM SIEM** (collecteur ELK) : c’est sur cette machine que vous installerez Elasticsearch, Kibana et Logstash.
+Open an SSH session on the **SIEM VM** (the ELK collector). Elasticsearch, Kibana and Logstash are installed on this machine.
 
 ```bash
-ssh UTILISATEUR@IP_SIEM
+ssh USER@IP_SIEM
 ```
 
-`IP_SIEM` et `UTILISATEUR` : valeurs indiquées sur [Proxmox](https://10.3.2.10:8006). Les étapes d’installation ELK ci-dessous se font **sur cette VM**.
+`IP_SIEM` and `USER` are the values shown in [Proxmox](https://10.3.2.10:8006). Every ELK install step below runs **on this VM**.
 
-#### Étape 2 : Vérification du système
+#### Step 2: Check the system
 
-Avant d’installer ELK, contrôlez l’OS, le noyau, la RAM et l’espace disque — le heap JVM dépend de la mémoire disponible.
+Before installing ELK, check the OS, kernel, RAM and disk. The JVM heap depends on how much memory you actually have.
 
 ```bash
-# Version de Debian
+# Debian version
 cat /etc/debian_version
 
-# Informations système
+# Kernel and hostname
 uname -a
 
-# Mémoire disponible
+# Memory
 free -h
 
-# Espace disque
+# Disk space
 df -h
 ```
 
-- `free -h` : mémoire libre/utilisée (lisible pour un humain).
-- `df -h` : espace disque par partition.
+- `free -h`: free and used memory, in human-readable units.
+- `df -h`: disk space per filesystem.
 
-**Vérification** : notez la RAM (`free -h`). Avec ~2 Go, limitez le heap JVM (voir §2.2). Avec davantage de RAM, vous pouvez monter le heap (ex. `1g`) sans saturer le système.
+**Check**: write down the RAM (`free -h`). With about 2 GB, keep the JVM heap small (see §2.2). With more RAM you can raise the heap (for example `1g`) without filling the machine.
 
-#### Étape 3 : Mise à jour du système
+#### Step 3: Update the system
 
-Actualisez la liste des paquets puis appliquez les mises à jour disponibles, pour éviter des dépendances obsolètes au moment d’installer Elastic.
+Refresh the package lists, then apply available updates, so Elastic does not install against stale dependencies.
 
 ```bash
 sudo apt update
 sudo apt upgrade -y
 ```
 
-`-y` : confirme automatiquement les questions d’apt (pas de prompt interactif).
+`-y`: answer yes to apt prompts, so the upgrade does not stop and wait.
 
-#### Étape 4 : Installation des outils de base
+#### Step 4: Install basic tools
 
-Installez les utilitaires dont le TP a besoin (téléchargements, édition, clé GPG).
+Install the tools this lab needs (downloads, editing, the GPG key).
 
 ```bash
 sudo apt install -y curl wget nano git gpg
@@ -168,95 +170,95 @@ sudo apt install -y curl wget nano git gpg
 
 ---
 
-### 2.2 Installation d'Elasticsearch
+### 2.2 Install Elasticsearch
 
-Si l'installation échoue, vérifiez que la procédure n'a pas changé dans la [documentation Elastic](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-with-debian-package).
+If the install fails, check that the procedure has not changed in the [Elastic documentation](https://www.elastic.co/docs/deploy-manage/deploy/self-managed/install-elasticsearch-with-debian-package).
 
-#### Étape 1 : Ajout de la clé GPG Elastic
+#### Step 1: Add the Elastic GPG key
 
-Téléchargez la clé publique Elastic et placez-la dans le keyring apt : apt ne fera confiance qu’aux paquets signés avec cette clé.
+Download Elastic's public key and store it in the apt keyring. apt will then trust only packages signed with that key.
 
 ```bash
 wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
 ```
 
-- `-qO -` : télécharge en silence et écrit sur la sortie standard (pour le pipe).
-- `gpg --dearmor` : convertit la clé ASCII en format binaire attendu par apt.
-- Le `|` (pipe) est **obligatoire** — sans lui, la clé n’est pas écrite dans le keyring.
+- `-qO -`: download quietly and write to standard output, so the pipe can read it.
+- `gpg --dearmor`: turn the ASCII key into the binary form apt expects.
+- The `|` (pipe) is **required**. Without it, the key is never written into the keyring.
 
-#### Étape 2 : Installation d'apt-transport-https
+#### Step 2: Install apt-transport-https
 
-Autorisez apt à récupérer des paquets via HTTPS (requis pour le dépôt Elastic).
+Allow apt to fetch packages over HTTPS. The Elastic repository needs that.
 
 ```bash
 sudo apt install -y apt-transport-https
 ```
 
-#### Étape 3 : Ajout du dépôt Elastic
+#### Step 3: Add the Elastic repository
 
-Enregistrez le dépôt Elastic 9.x dans les sources apt, en liant la clé GPG ajoutée à l’étape 1.
+Register the Elastic 9.x repository in apt's sources, and bind it to the GPG key from step 1.
 
 ```bash
 echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-9.x.list
 ```
 
-- `signed-by=...` : apt vérifie les paquets avec le keyring créé plus haut.
-- `tee` : écrit la ligne dans le fichier sources tout en l’affichant à l’écran (avec `sudo`).
+- `signed-by=...`: apt checks packages against the keyring you just created.
+- `tee`: writes the line into the sources file and prints it (needed so `sudo` can write the file).
 
-#### Étape 4 : Mise à jour et installation
+#### Step 4: Update and install
 
-Rechargez les listes de paquets (le nouveau dépôt apparaît), puis installez Elasticsearch.
+Reload package lists so the new repository shows up, then install Elasticsearch.
 
 ```bash
 sudo apt-get update && sudo apt-get install elasticsearch
 ```
 
-`&&` : n’installe que si la mise à jour des listes a réussi.
+`&&`: install only if the list update succeeded.
 
-#### Étape 5 : Configuration d'Elasticsearch (mémoire heap)
+#### Step 5: Configure the Elasticsearch heap
 
-**IMPORTANT** : adaptez le heap à la RAM réelle de la VM SIEM.
+**Important**: set the heap from the SIEM VM's real RAM.
 
-Ouvrez (ou créez) le fichier d’options JVM dédié au heap — c’est ici que vous limiterez la mémoire d’Elasticsearch.
+Open (or create) the JVM options file used for the heap. This is where you cap Elasticsearch's memory.
 
 ```bash
 sudo nano /etc/elasticsearch/jvm.options.d/heapsizemem.options
 ```
 
-**Note** : l’extension doit être `.options` (pas `.conf`) pour être prise en compte par Elasticsearch.
+**Note**: the extension must be `.options` (not `.conf`), or Elasticsearch ignores the file.
 
-Avec **~2 Go** de RAM (salle typique), placez ceci dans le fichier :
+With **about 2 GB** of RAM (typical classroom VM), put this in the file:
 
 ```properties
-# Heap limité à 512 Mo
+# Heap capped at 512 MB
 -Xms512m
 -Xmx512m
 ```
 
-Avec **~8 Go** de RAM et **8 vCPU** :
+With **about 8 GB** of RAM and **8 vCPU**:
 
 ```properties
-# Heap 2 Go — marge confortable pour Kibana + Logstash sur 8 Go
+# 2 GB heap — comfortable headroom for Kibana + Logstash on 8 GB
 -Xms2g
 -Xmx2g
 ```
 
-Avec **~6 Go** de RAM (autre sizing courant) :
+With **about 6 GB** of RAM:
 
 ```properties
-# Heap 1 Go
+# 1 GB heap
 -Xms1g
 -Xmx1g
 ```
 
-**Explication** :
-- `-Xms` / `-Xmx` : taille initiale et maximale du heap JVM (gardez-les égales).
-- La mémoire totale utilisée par Elasticsearch dépasse le heap (off-heap, buffers, processus auxiliaires).
-- Vérifiez après démarrage avec `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_nodes/jvm?pretty` (`heap_max_in_bytes`).
+**What this means**:
+- `-Xms` / `-Xmx`: initial and maximum JVM heap. Keep them equal.
+- Elasticsearch uses more RAM than the heap (off-heap, buffers, helper processes).
+- After startup, check with `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_nodes/jvm?pretty` (`heap_max_in_bytes`).
 
-#### Étape 6 : Certificats TLS
+#### Step 6: TLS certificates
 
-Installez `unzip` si besoin, puis générez une CA et un certificat nœud avec **SAN** (localhost + IP du SIEM). Remplacez `IP_SIEM` par l’IP réelle.
+Install `unzip` if needed, then generate a CA and a node certificate with a **SAN** (localhost + SIEM IP). Replace `IP_SIEM` with the real address.
 
 ```bash
 sudo apt install -y unzip
@@ -279,20 +281,19 @@ sudo cp "$INSTANCE"/*.crt /etc/elasticsearch/certs/node.crt
 sudo cp "$INSTANCE"/*.key /etc/elasticsearch/certs/node.key
 sudo chown -R elasticsearch:elasticsearch /etc/elasticsearch/certs
 sudo chmod 640 /etc/elasticsearch/certs/*
-# Copie utilisable pour scp vers les Beats / votre PC
 sudo cp /etc/elasticsearch/certs/http_ca.crt /home/$USER/http_ca.crt
 sudo chown $USER:$USER /home/$USER/http_ca.crt
 ```
 
-#### Étape 7 : Configuration d'Elasticsearch
+#### Step 7: Elasticsearch configuration
 
-Éditez la configuration principale pour exposer l’API, nommer le nœud et activer TLS + authentification.
+Edit the main config to expose the API, name the node, and enable TLS plus authentication.
 
 ```bash
 sudo nano /etc/elasticsearch/elasticsearch.yml
 ```
 
-**Configuration pour Elasticsearch 9.x** :
+**Elasticsearch 9.x**:
 
 ```yaml
 cluster.name: siem-cluster
@@ -322,37 +323,37 @@ xpack.security.transport.ssl:
   certificate_authorities: ["certs/ca.crt"]
 ```
 
-**Notes** :
-- Le `elasticsearch.yml` du paquet a déjà, **décommentés**, `path.data: /var/lib/elasticsearch` et `path.logs: /var/log/elasticsearch`. Gardez-les. Le reste du fichier est commenté : ajoutez le bloc ci-dessus, ne réécrivez pas le fichier à vide.
-- Dans Elasticsearch 9.x, `http.host` complète / remplace l’ancien `network.host` pour l’API HTTP.
-- Sur un seul nœud, `discovery.type: single-node` évite `cluster.initial_master_nodes`.
-- Ne mettez **jamais** les mots de passe réels dans un dépôt Git.
+**Notes**:
+- The package `elasticsearch.yml` already has **uncommented** `path.data: /var/lib/elasticsearch` and `path.logs: /var/log/elasticsearch`. Keep them. The rest of the file is commented: add the block above, do not blank the file.
+- On Elasticsearch 9.x, `http.host` is the HTTP API bind setting.
+- On a single node, `discovery.type: single-node` avoids `cluster.initial_master_nodes`.
+- Never commit real passwords to Git.
 
-#### Étape 8 : Démarrage et comptes
+#### Step 8: Start the service and create accounts
 
 ```bash
 sudo systemctl enable --now elasticsearch
 sudo systemctl status elasticsearch
 ```
 
-Attendez 30–60 s. Sans mot de passe, l’API répond en **401** (TLS OK, auth requise) :
+Wait 30–60 s. Without a password, the API returns **401** (TLS OK, auth required):
 
 ```bash
 curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:9200
 ```
 
-Réinitialisez les comptes built-in (notez les « New value ») :
+Reset the built-in accounts (write down the “New value” lines):
 
 ```bash
 sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b
 sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system -b
 ```
 
-Créez un rôle et un utilisateur pour les Beats :
+Create a role and user for Beats:
 
 ```bash
-export ELASTIC_PASS='…'   # mot de passe elastic ci-dessus
-export BEATS_PASS='…'     # mot de passe fort choisi pour beats_writer
+export ELASTIC_PASS='…'
+export BEATS_PASS='…'
 
 curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt \
   -X PUT "https://127.0.0.1:9200/_security/role/beats_writer_role" \
@@ -373,54 +374,54 @@ curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.
 }"
 ```
 
-#### Étape 9 : Vérification
+#### Step 9: Check that it answers
 
 ```bash
 curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt https://127.0.0.1:9200
 curl -sk -u "elastic:${ELASTIC_PASS}" --cacert /etc/elasticsearch/certs/http_ca.crt https://127.0.0.1:9200/_nodes/jvm?pretty
 ```
 
-Vous devez obtenir du JSON (infos cluster / heap). Depuis un autre hôte du labo (avec la CA copiée) :
+From another lab host (with the CA copied):
 
 ```bash
 curl -sk -u "elastic:${ELASTIC_PASS}" --cacert ./http_ca.crt https://IP_SIEM:9200
 ```
 
-Sur un cluster à **un seul nœud**, le statut `yellow` (réplicas non assignés) est **normal**.
+On a **single-node** cluster, status `yellow` (unassigned replicas) is **normal**.
 
-#### Aide : Résolution d'un problème de mémoire
+#### Help: out-of-memory at startup
 
-**Situation** : Elasticsearch ne démarre pas ou plante avec une erreur de mémoire.
+**Situation**: Elasticsearch does not start, or crashes with a memory error.
 
-**Procédure** :
-1. Vérifiez les logs : `sudo journalctl -u elasticsearch -n 50`
-2. Identifiez l'erreur liée à la mémoire
-3. Ajustez les paramètres `-Xms` et `-Xmx` dans `/etc/elasticsearch/jvm.options`
-4. Redémarrez Elasticsearch : `sudo systemctl restart elasticsearch`
+**What to do**:
+1. Read the logs: `sudo journalctl -u elasticsearch -n 50`
+2. Find the memory error
+3. Lower `-Xms` and `-Xmx` in `/etc/elasticsearch/jvm.options`
+4. Restart: `sudo systemctl restart elasticsearch`
 
-**Indice** : Avec ~2 Go de RAM, partez sur un heap de **512m** (§2.2). Un heap de 1 Go convient plutôt à une VM SIEM plus large (~8 Go).
+**Hint**: with about 2 GB of RAM, start from a **512m** heap (§2.2). A 1 GB heap fits a larger SIEM VM (about 8 GB).
 
 ---
 
-### 2.3 Installation de Kibana
+### 2.3 Install Kibana
 
-#### Étape 1 : Installation
+#### Step 1: Install
 
-Kibana est dans le même dépôt Elastic déjà configuré. Installez le paquet pour disposer de l’interface web du SIEM.
+Kibana is in the Elastic repository you already added. Install the package to get the SIEM web UI.
 
 ```bash
 sudo apt install -y kibana
 ```
 
-#### Étape 2 : Configuration de Kibana
+#### Step 2: Configure Kibana
 
-Copiez la CA Elasticsearch, puis éditez `kibana.yml` pour pointer vers HTTPS et le compte `kibana_system`. Ne remplacez pas le fichier entier.
+Copy the Elasticsearch CA, then point Kibana at HTTPS and the `kibana_system` account. Do not replace the whole file.
 
 ```bash
 sudo mkdir -p /etc/kibana/certs
 sudo cp /etc/elasticsearch/certs/http_ca.crt /etc/kibana/certs/http_ca.crt
 sudo chown -R kibana:kibana /etc/kibana/certs
-ENC_KEY=$(openssl rand -hex 32)   # ≥ 32 caractères — gardez-la
+ENC_KEY=$(openssl rand -hex 32)
 sudo nano /etc/kibana/kibana.yml
 ```
 
@@ -439,7 +440,7 @@ xpack.reporting.encryptionKey: "ENC_KEY"
 xpack.security.encryptionKey: "ENC_KEY"
 ```
 
-Le paquet Kibana 9.5 a déjà deux réglages **actifs** (non commentés). **Gardez-les** :
+The Kibana 9.5 package already has two **active** settings. **Keep them**:
 
 ```yaml
 logging:
@@ -454,69 +455,81 @@ logging:
 pid.file: /run/kibana/kibana.pid
 ```
 
-Dans le même fichier, `server.host`, `server.port` et `elasticsearch.hosts` sont **commentés** (`localhost`, `http://localhost:9200`). Décommentez-les et remplacez-les par le bloc HTTPS ci-dessus. Ajoutez les trois `encryptionKey` (absentes du paquet).
+In the same file, `server.host`, `server.port` and `elasticsearch.hosts` are **commented** (`localhost`, `http://localhost:9200`). Uncomment them and replace them with the HTTPS block above. Add the three `encryptionKey` lines (they are not in the package).
 
-Remplacez `KIBANA_SYSTEM_PASS` et `ENC_KEY` par les valeurs réelles, puis :
+Replace `KIBANA_SYSTEM_PASS` and `ENC_KEY` with real values, then:
 
 ```bash
 sudo chmod 640 /etc/kibana/kibana.yml
 sudo chown root:kibana /etc/kibana/kibana.yml
 ```
 
-- `server.host: "0.0.0.0"` : accessible depuis votre PC Windows.
-- Kibana écoute en **HTTP** sur `:5601` ; le lien **Kibana → Elasticsearch** est en **HTTPS**.
+- `server.host: "0.0.0.0"`: reachable from your Windows PC.
+- Kibana listens in **HTTP** on `:5601`; the **Kibana → Elasticsearch** link is **HTTPS**.
 
-#### Étape 3 : Démarrage de Kibana
+#### Step 3: Start Kibana
+
+Start Kibana and enable it at boot.
 
 ```bash
-sudo systemctl enable --now kibana
+sudo systemctl start kibana
+sudo systemctl enable kibana
+```
+
+Check the service:
+
+```bash
 sudo systemctl status kibana
 ```
 
-**Note importante** : 
-- Kibana peut prendre **1-2 minutes** pour démarrer complètement.
-- **Lors du premier démarrage**, Kibana effectue des migrations d'objets sauvegardés qui peuvent prendre **3-5 minutes** supplémentaires.
-- Pendant ce temps, la page web peut rester en chargement. C'est **normal**.
-- Suivez les logs : `sudo journalctl -u kibana -f` — absence de `Unable to connect to Elasticsearch` / erreur SSL.
+**Important**:
+- Kibana can take **1–2 minutes** to finish starting.
+- **On the first start**, Kibana migrates saved objects. That can take another **3–5 minutes**.
+- The web page may keep loading during that time. That is **normal**.
+- Follow the logs live (`-f` means follow) to see the migration:
 
-#### Étape 4 : Accès à Kibana
+  ```bash
+  sudo journalctl -u kibana -f
+  ```
 
-Depuis le navigateur de votre poste Windows (remplacez `IP_SIEM`) :
+  You should see "Starting saved objects migrations", then "Migration completed" or something similar.
+
+#### Step 4: Open Kibana
+
+From the browser on your Windows machine, open this URL (replace `IP_SIEM`):
 
 ```
 http://IP_SIEM:5601
 ```
 
-Connectez-vous avec l’utilisateur **`elastic`** et le mot de passe obtenu via `elasticsearch-reset-password`.
+There is no login on this lab: security is disabled. You should land on the Kibana home page.
 
-**Vérification** : page de login puis interface Kibana.
+#### Help: Kibana is not reachable from Windows
 
-#### Aide : Configuration de l'accès depuis Windows
+**Situation**: you cannot open Kibana from your Windows PC.
 
-**Situation** : Vous ne pouvez pas accéder à Kibana depuis votre PC Windows.
+**What to do**:
+1. Check that Kibana listens on every interface: `sudo netstat -tlnp | grep 5601`
+2. Check the VM firewall: `sudo ufw status`
+3. If the firewall blocks the port: `sudo ufw allow 5601/tcp`
+4. From your PC, check connectivity: `ping IP_SIEM`
+5. From your PC, test: `curl http://IP_SIEM:5601`, or open the URL in the browser
 
-**Procédure** :
-1. Vérifiez que Kibana écoute sur toutes les interfaces : `sudo netstat -tlnp | grep 5601`
-2. Vérifiez le pare-feu de la VM : `sudo ufw status`
-3. Si le pare-feu bloque, autorisez le port : `sudo ufw allow 5601/tcp`
-4. Vérifiez la connectivité depuis votre PC : `ping IP_SIEM`
-5. Testez depuis votre PC : `curl http://IP_SIEM:5601` ou ouvrez dans le navigateur
-
-**Indice** : si un pare-feu est actif, ouvrez aussi le port 9200 pour qu'Elasticsearch reste joignable depuis les agents.
+**Hint**: if a firewall is on, also open port 9200 so the agents can reach Elasticsearch.
 
 ---
 
-### 2.4 Installation de Logstash
+### 2.4 Install Logstash
 
-#### Étape 1 : JDK
+#### Step 1: JDK
 
-Le paquet Logstash 9 embarque son propre JDK (`/usr/share/logstash/jdk`). N’installez pas `default-jre` pour ce TP : le service n’utilise pas le `java` du système. Le heap reste celui de `/etc/logstash/jvm.options` (1 Go). Ce labo ne le modifie pas.
+The Logstash 9 package ships its own JDK (`/usr/share/logstash/jdk`). Do not install `default-jre` for this lab: the service does not use the system `java`. The heap stays at `/etc/logstash/jvm.options` (1 GB). This lab does not change it.
 
 ---
 
-#### Étape 2 : Installation de Logstash
+#### Step 2: Install Logstash
 
-Rechargez apt si besoin, puis installez Logstash (toujours depuis le dépôt Elastic 9.x).
+Refresh apt if needed, then install Logstash from the same Elastic 9.x repository.
 
 ```bash
 sudo apt update
@@ -525,16 +538,16 @@ sudo apt install -y logstash
 
 ---
 
-#### Étape 3 : Configuration de base de Logstash
+#### Step 3: Basic Logstash configuration
 
-Le fichier `/etc/logstash/logstash.yml` du paquet est entièrement commenté. `/etc/logstash/pipelines.yml` pointe **déjà** vers les pipelines :
+The package `/etc/logstash/logstash.yml` is fully commented. `/etc/logstash/pipelines.yml` **already** points at the pipelines:
 
 ```yaml
 - pipeline.id: main
   path.config: "/etc/logstash/conf.d/*.conf"
 ```
 
-Ne dupliquez pas `path.config` dans `logstash.yml`. Décommentez seulement les deux lignes déjà présentes :
+Do not copy `path.config` into `logstash.yml`. Uncomment only the two lines that are already there:
 
 ```yaml
 path.data: /var/lib/logstash
@@ -545,31 +558,31 @@ path.logs: /var/log/logstash
 sudo nano /etc/logstash/logstash.yml
 ```
 
-Créez les répertoires manquants et donnez-les à l’utilisateur `logstash` — sans cela, le service échoue souvent au démarrage.
+Create any missing directories and give them to the `logstash` user. Without that, the service often fails at startup.
 
 ```bash
 sudo mkdir -p /var/log/logstash /var/lib/logstash
 sudo chown -R logstash:logstash /var/log/logstash /var/lib/logstash
 ```
 
-- `mkdir -p` : crée les dossiers (et parents) s’ils n’existent pas.
-- `chown -R logstash:logstash` : propriétaire et groupe du service Logstash sur toute l’arborescence.
+- `mkdir -p`: create the directories (and parents) if they are missing.
+- `chown -R logstash:logstash`: owner and group of the Logstash service, on the whole tree.
 
 ---
 
-#### Étape 4 : Création d’un pipeline de test (mode service compatible)
+#### Step 4: A test pipeline that works under systemd
 
-**Important** :
-Le pipeline `stdin {}` **ne doit pas être utilisé avec systemd**, car il provoque l’arrêt immédiat de Logstash.
-On utilise donc un **input file** pour un vrai test.
+**Important**:
+Do **not** use a `stdin {}` pipeline with systemd. Logstash exits immediately.
+Use a **file input** so the test is a real, long-running pipeline.
 
-Créez le fichier de pipeline de test : Logstash lira ce conf au prochain redémarrage.
+Create the test pipeline file. Logstash reads it on the next restart.
 
 ```bash
 sudo nano /etc/logstash/conf.d/test.conf
 ```
 
-Configuration :
+Configuration:
 
 ```ruby
 input {
@@ -581,7 +594,7 @@ input {
   }
 }
 filter {
-  # Aucun filtre pour le test
+  # No filter for this test
 }
 
 output {
@@ -599,38 +612,37 @@ output {
 }
 ```
 
-Avant de démarrer Logstash, copiez la CA si besoin (`sudo cp /etc/elasticsearch/certs/http_ca.crt /etc/logstash/http_ca.crt` et adaptez `ssl_certificate_authorities`) et substituez le mot de passe `elastic` (évitez de laisser un secret en clair durablement — labo uniquement). Sur Logstash 9.x, l’ancien réglage `cacert` est **obsolète** : le pipeline refuse de démarrer s’il est encore présent.
+- `sincedb_path => "/dev/null"`: forget the previous read position, so the test can be repeated.
+- `index => "test-logs-%{+YYYY.MM.dd}"`: create an Elasticsearch index named with today's date.
+- On Logstash 9.x, the old `cacert` setting is **obsolete** and prevents the pipeline from starting. Use `ssl_certificate_authorities` (and `ssl_enabled => true`) instead.
 
-- `sincedb_path => "/dev/null"` : ignore la position de lecture précédente (utile pour un test reproductible).
-- `index => "test-logs-%{+YYYY.MM.dd}"` : crée un index Elasticsearch daté du jour.
-
-Créez le fichier source lu par le pipeline et rendez-le accessible en écriture pour le test :
+Create the file the pipeline reads, and make it writable for the test:
 
 ```bash
 sudo touch /tmp/logstash-test.log
 sudo chmod 666 /tmp/logstash-test.log
 ```
 
-`chmod 666` : lecture/écriture pour tous (pratique en labo pour `echo >>` sans sudo) — **pas** pour la production.
+`chmod 666`: read and write for everyone. Handy in the lab so `echo >>` works without sudo. **Not** for production.
 
 ---
 
-#### Étape 5 : Démarrage de Logstash
+#### Step 5: Start Logstash
 
-Activez le service au boot et redémarrez-le pour charger le nouveau pipeline.
+Enable the service at boot and restart it so it loads the new pipeline.
 
 ```bash
 sudo systemctl enable logstash
 sudo systemctl restart logstash
 ```
 
-Contrôlez que le service tourne :
+Confirm it is running:
 
 ```bash
 sudo systemctl status logstash
 ```
 
-Vous devez voir :
+You must see:
 
 ```
 Active: active (running)
@@ -638,41 +650,41 @@ Active: active (running)
 
 ---
 
-#### Étape 6 : Test du pipeline
+#### Step 6: Test the pipeline
 
-Dans un autre terminal, ajoutez des lignes au fichier surveillé : Logstash les lit, les envoie vers Elasticsearch et les affiche en debug.
+In another terminal, append lines to the watched file. Logstash reads them, sends them to Elasticsearch, and prints them in debug.
 
 ```bash
 echo "Bonjour Logstash" >> /tmp/logstash-test.log
 echo "Deuxième message" >> /tmp/logstash-test.log
 ```
 
-`>>` : ajoute en fin de fichier (sans écraser le contenu existant).
+`>>`: append to the file. It does not wipe what is already there.
 
-Résultat attendu :
+Expected result:
 
-* Les lignes apparaissent dans Elasticsearch. Dans Kibana : **Stack Management → Index Management**, index `test-logs-YYYY.MM.dd`.
-* Logstash **reste actif** (il ne doit pas s'arrêter après le test).
-
----
-
-#### Pipeline pour les logs Apache
-
-**Objectif**
-
-Créer un pipeline Logstash qui lit et parse les logs Apache.
+* The lines show up in Elasticsearch. In Kibana: **Stack Management → Index Management**, index `test-logs-YYYY.MM.dd`.
+* Logstash **stays running**. It must not exit after the test.
 
 ---
 
-##### Étape 1 : Installation d’Apache
+#### Apache log pipeline
 
-Installez Apache sur la VM SIEM pour produire des `access.log` locaux que Logstash pourra parser (exercice pipeline ; la collecte recommandée en deux VMs reste Filebeat, §3.1).
+**Goal**
+
+Build a Logstash pipeline that reads and parses Apache logs.
+
+---
+
+##### Step 1: Install Apache
+
+Install Apache on the SIEM VM so you get local `access.log` lines for Logstash to parse. This is a pipeline exercise. In the two-VM layout, the recommended Apache collection is still Filebeat (§3.1).
 
 ```bash
 sudo apt install -y apache2
 ```
 
-Vérifiez qu’Apache répond en local (page par défaut) :
+Check that Apache answers locally (the default page):
 
 ```bash
 curl http://localhost
@@ -680,15 +692,15 @@ curl http://localhost
 
 ---
 
-##### Étape 2 : Création du pipeline Apache
+##### Step 2: Create the Apache pipeline
 
-Créez le pipeline qui lit `/var/log/apache2/access.log`, parse avec Grok, et indexe dans Elasticsearch.
+Create the pipeline that reads `/var/log/apache2/access.log`, parses it with Grok, and indexes it in Elasticsearch.
 
 ```bash
 sudo nano /etc/logstash/conf.d/apache.conf
 ```
 
-Configuration :
+Configuration:
 
 ```ruby
 input {
@@ -721,47 +733,47 @@ output {
 }
 ```
 
-**Important** :
-Désactivez le pipeline de test pour ne garder qu’un pipeline actif (évite des index inutiles et du bruit) :
+**Important**:
+Disable the test pipeline so only one pipeline stays active. That avoids extra indexes and noise.
 
 ```bash
 sudo mv /etc/logstash/conf.d/test.conf /etc/logstash/conf.d/test.conf.disabled
 ```
 
-Ajoutez l’utilisateur `logstash` au groupe `adm` pour qu’il puisse lire les logs Apache (souvent en `640 root:adm`) :
+Add the `logstash` user to the `adm` group so it can read Apache logs (often mode `640`, owner `root:adm`):
 
 ```bash
 sudo usermod -aG adm logstash
 ```
 
-`-aG` : ajoute au groupe sans retirer les autres groupes existants.
+`-aG`: add the group without removing the groups the user already has.
 
 ---
 
-##### Étape 3 : Redémarrage de Logstash
+##### Step 3: Restart Logstash
 
-Rechargez Logstash pour prendre en compte `apache.conf` et le nouveau groupe.
+Reload Logstash so it picks up `apache.conf` and the new group membership.
 
 ```bash
 sudo systemctl restart logstash
 ```
 
-Consultez les 20 dernières lignes du journal du service (`--no-pager` : affichage direct, sans pager interactif) :
+Show the last 20 lines of the service journal (`--no-pager`: print and exit, no interactive pager):
 
 ```bash
 journalctl -u logstash -n 20 --no-pager
 ```
 
-Vous devez voir :
+You must see:
 
 * `Pipeline started`
-* aucune erreur fatale
+* no fatal error
 
 ---
 
-##### Étape 4 : Génération de trafic Apache
+##### Step 4: Generate Apache traffic
 
-Générez quelques requêtes HTTP : chaque `curl` ajoute une ligne dans `access.log`, que Logstash enverra vers l’index `apache-logs-*`.
+Send a few HTTP requests. Each `curl` adds a line to `access.log`, which Logstash forwards to the `apache-logs-*` index.
 
 ```bash
 curl http://localhost
@@ -771,74 +783,74 @@ curl http://localhost
 
 ---
 
-##### Étape 5 : Vérification dans Kibana
+##### Step 5: Check in Kibana
 
-1. Allez dans **Stack Management → Data Views**
-2. Créez une data view :
+1. Go to **Stack Management → Data Views**
+2. Create a data view:
 
    ```
    apache-logs-*
    ```
-3. Champ temporel : `@timestamp`
-4. Allez dans **Discover**
+3. Time field: `@timestamp`
+4. Open **Discover**
 
-Résultat attendu :
+Expected result:
 
-* Requêtes Apache visibles
-* Champs parsés (`clientip`, `verb`, `request`, `response`, etc.)
+* Apache requests are visible
+* Parsed fields (`clientip`, `verb`, `request`, `response`, and so on)
 
 ---
 
-**Indice**
+**Hint**
 
-Pattern Grok utilisé :
+Grok pattern used:
 
 ```
 %{COMBINEDAPACHELOG}
 ```
 
-Documentation officielle : [grok](https://www.elastic.co/guide/en/logstash/current/plugins-filters-grok.html)
+Official documentation: [grok](https://www.elastic.co/guide/en/logstash/current/plugins-filters-grok.html)
 
 ---
 
-## 3. Partie 2 : Configuration des agents Beats (VM à surveiller)
+## 3. Part 2: Configure Beats agents (monitored VM)
 
-> **Où travailler** : les étapes Filebeat / Metricbeat / Suricata / Apache de cette partie se font sur la **VM à surveiller**, pas sur le SIEM.  
-> Remplacez `IP_SIEM` par l’adresse IP de la VM ELK.  
-> Ajoutez d’abord le dépôt Elastic `9.x` sur cette VM (même procédure GPG + `elastic-9.x.list` qu’en §2.2), puis installez les paquets Beats.
+> **Where to work**: Filebeat, Metricbeat, Suricata and Apache in this part run on the **monitored VM**, not on the SIEM.  
+> Replace `IP_SIEM` with the ELK VM's address.  
+> First add the Elastic `9.x` repository on this VM (same GPG + `elastic-9.x.list` procedure as §2.2), then install the Beats packages.
 
-### 3.1 Installation et configuration de Filebeat
+### 3.1 Install and configure Filebeat
 
-#### Étape 1 : Installation de Filebeat
+#### Step 1: Install Filebeat
 
-Debian 13 enregistre l’authentification et le syslog dans **journald** (`journalctl`). Le module `system` de Filebeat lit ce journal directement (`var.use_journald`). rsyslog n’est pas nécessaire.
+Debian 13 stores authentication and syslog in **journald** (`journalctl`). Filebeat's `system` module reads that journal directly (`var.use_journald`). rsyslog is not required.
 
-Installez Filebeat (agent de collecte vers Elasticsearch).
+Install Filebeat, the agent that ships logs to Elasticsearch.
 
 ```bash
 sudo apt install -y filebeat
 ```
 
-#### Étape 2 : Configuration de base (sortie vers le SIEM)
+#### Step 2: Basic configuration (output to the SIEM)
 
-Le paquet installe un `/etc/filebeat/filebeat.yml` **par défaut** qui pointe encore vers `localhost:9200` en HTTP, avec auth et TLS **commentés**. Vous partez de ce fichier : ne le remplacez pas en entier, **modifiez la section `output.elasticsearch`**.
+The package ships a **default** `/etc/filebeat/filebeat.yml` that still points at `localhost:9200` over HTTP, with auth and TLS **commented out**. Start from that file: do not replace it wholesale — **edit the `output.elasticsearch` section**.
 
-Sur la VM à surveiller, récupérez d’abord la CA depuis le SIEM :
+On the monitored VM, fetch the CA from the SIEM first:
 
 ```bash
-scp UTILISATEUR@IP_SIEM:~/http_ca.crt /tmp/http_ca.crt
+scp USER@IP_SIEM:~/http_ca.crt /tmp/http_ca.crt
 sudo mkdir -p /etc/filebeat/certs /etc/metricbeat/certs
 sudo cp /tmp/http_ca.crt /etc/filebeat/certs/http_ca.crt
 sudo cp /tmp/http_ca.crt /etc/metricbeat/certs/http_ca.crt
 ```
 
-Éditez ensuite la config :
+Then edit the config:
 
 ```bash
 sudo nano /etc/filebeat/filebeat.yml
 ```
 
-**Ce que le fichier stock contient** (repères à chercher, Elastic 9.x) :
+**What the stock file looks like** (landmarks to find, Elastic 9.x):
 
 ```yaml
 output.elasticsearch:
@@ -849,29 +861,29 @@ output.elasticsearch:
   #password: "changeme"
 ```
 
-Plus bas, une section **`#output.logstash:`** contient aussi des lignes `#ssl.certificate_authorities: …` — **ne les décommentez pas** : ce n’est pas la sortie Elasticsearch, et les Beats de ce TP parlent à Elasticsearch, pas à Logstash (`:5044`).
+Further down, a **`#output.logstash:`** section also has `#ssl.certificate_authorities: …` lines — **do not uncomment those**. That is not the Elasticsearch output, and Beats in this lab talk to Elasticsearch, not to Logstash (`:5044`).
 
-Conservez le reste du fichier paquet, en particulier :
+Keep the rest of the package file, in particular:
 
-- `filebeat.inputs` : l’exemple `filestream` reste `enabled: false`. Si vous le passez à `true`, Filebeat envoie aussi `/var/log/*.log` en plus des modules.
-- `filebeat.config.modules` (`modules.d/*.yml`) : c’est ce qui charge system / apache / suricata.
+- `filebeat.inputs`: the sample `filestream` stays `enabled: false`. If you set it to `true`, Filebeat also ships `/var/log/*.log` on top of the modules.
+- `filebeat.config.modules` (`modules.d/*.yml`): this is what loads system / apache / suricata.
 - `setup.template.settings` (`index.number_of_shards: 1`).
-- `processors` (au minimum `add_host_metadata`).
+- `processors` (at least `add_host_metadata`).
 
-**Ce qu’il faut faire** dans `output.elasticsearch` seulement :
+**What to change** under `output.elasticsearch` only:
 
-1. Remplacer `hosts` par l’URL **HTTPS** du SIEM (`https://` dans l’URL suffit ; vous pouvez laisser `#protocol: "https"` commenté).
-2. Décommenter et adapter `username` / `password` (`beats_writer` / mot de passe du labo — **pas** `elastic`).
-3. **Ajouter** un bloc `ssl:` (absent du YAML paquet sous `output.elasticsearch`) pour faire confiance à la CA du labo.
+1. Set `hosts` to the SIEM **HTTPS** URL (`https://` in the URL is enough; you can leave `#protocol: "https"` commented).
+2. Uncomment and set `username` / `password` (`beats_writer` / lab password — **not** `elastic`).
+3. **Add** an `ssl:` block (missing under `output.elasticsearch` in the package YAML) so Filebeat trusts the lab CA.
 
-Résultat attendu :
+Expected result:
 
 ```yaml
 output.elasticsearch:
   # Array of hosts to connect to.
   hosts: ["https://IP_SIEM:9200"]
   preset: balanced
-  #protocol: "https"   # inutile si hosts commence déjà par https://
+  #protocol: "https"   # not needed if hosts already starts with https://
   username: "beats_writer"
   password: "BEATS_PASS"
   ssl:
@@ -880,24 +892,24 @@ output.elasticsearch:
     verification_mode: full
 ```
 
-- Sans `https://` (ou sans `protocol: "https"`), Filebeat tente du **HTTP** clair → échec vers ES 9 en TLS.
-- Sans le bloc `ssl` + CA, le handshake échoue souvent (*x509: certificate signed by unknown authority*).
-- `verification_mode: full` exige que l’IP/hostname dans `hosts` soit dans le SAN du certificat nœud (le TP a généré un cert avec `IP_SIEM`).
+- Without `https://` (or without `protocol: "https"`), Filebeat uses plain **HTTP** → fails against ES 9 with TLS.
+- Without the `ssl` + CA block, the handshake often fails (*x509: certificate signed by unknown authority*).
+- `verification_mode: full` requires the IP/hostname in `hosts` to match a SAN on the node certificate (this lab generates a cert with `IP_SIEM`).
 
-Vérifiez : `sudo filebeat test output` — attendu : `TLS... handshake... OK` puis `talk to server... OK`.
-#### Étape 3 : Activation des modules (système, Apache, Suricata)
+Check with `sudo filebeat test output` — expect `TLS... handshake... OK` then `talk to server... OK`.
+#### Step 3: Enable modules (system, Apache, Suricata)
 
-Activez les modules Filebeat qui savent lire les logs SSH/auth, Apache et Suricata (EVE JSON) sans écrire les chemins à la main.
+Enable the Filebeat modules that already know how to read SSH/auth logs, Apache and Suricata (EVE JSON). You do not have to type the paths by hand.
 
 ```bash
 sudo filebeat modules enable system apache suricata
 ```
 
-**Suricata** : n’activez le module que si `/var/log/suricata/eve.json` existe **et** que le fileset `eve` est configuré. Sinon : `sudo filebeat modules disable suricata` (sinon Filebeat refuse de démarrer).
+**Suricata**: enable the module only if `/var/log/suricata/eve.json` exists **and** the `eve` fileset is configured. Otherwise run `sudo filebeat modules disable suricata` (Filebeat will refuse to start).
 
-#### Étape 4 : Configuration des modules
+#### Step 4: Configure the modules
 
-**Système (SSH / auth)** — `/etc/filebeat/modules.d/system.yml` :
+**System (SSH / auth)** — `/etc/filebeat/modules.d/system.yml`:
 
 ```yaml
 - module: system
@@ -909,18 +921,18 @@ sudo filebeat modules enable system apache suricata
     var.use_journald: true
 ```
 
-`var.use_journald: true` : Filebeat lit le journal systemd (facilities auth/authpriv pour `auth`, le reste pour `syslog`) au lieu de `/var/log/auth.log` et `/var/log/syslog`.
+`var.use_journald: true`: Filebeat reads the systemd journal (auth/authpriv facilities for `auth`, the others for `syslog`) instead of `/var/log/auth.log` and `/var/log/syslog`.
 
-Le service du paquet tourne en root et peut lire le journal. S’il tourne sous l’utilisateur `filebeat`, ajoutez-le au groupe qui possède le journal, puis redémarrez :
+The packaged service runs as root and can read the journal. If it runs as the `filebeat` user, add that user to the journal group, then restart:
 
 ```bash
 sudo usermod -aG systemd-journal filebeat
 sudo systemctl restart filebeat
 ```
 
-Contrôle : `sudo journalctl -u filebeat -n 30` ne doit plus afficher un harvester sur `/var/log/auth.log`. Une erreur `permission denied` sur le journal signifie que le compte du service n’est pas dans `systemd-journal`.
+Check: `sudo journalctl -u filebeat -n 30` must not show a harvester on `/var/log/auth.log`. A `permission denied` error on the journal means the service account is not in `systemd-journal`.
 
-**Apache** — `/etc/filebeat/modules.d/apache.yml` :
+**Apache** — `/etc/filebeat/modules.d/apache.yml`:
 
 ```yaml
 - module: apache
@@ -932,9 +944,9 @@ Contrôle : `sudo journalctl -u filebeat -n 30` ne doit plus afficher un harvest
     var.paths: ["/var/log/apache2/error.log*"]
 ```
 
-Sans `var.paths`, le module Apache du paquet lit déjà `/var/log/apache2/` sur Debian. Les chemins ci-dessus ne servent que si les logs sont ailleurs. Suricata, lui, a besoin de `var.paths` vers `eve.json`.
+Without `var.paths`, the package Apache module already reads `/var/log/apache2/` on Debian. The paths above matter only if the logs live elsewhere. Suricata does need `var.paths` pointing at `eve.json`.
 
-**Suricata** — `/etc/filebeat/modules.d/suricata.yml` :
+**Suricata** — `/etc/filebeat/modules.d/suricata.yml`:
 
 ```yaml
 - module: suricata
@@ -943,80 +955,80 @@ Sans `var.paths`, le module Apache du paquet lit déjà `/var/log/apache2/` sur 
     var.paths: ["/var/log/suricata/eve.json"]
 ```
 
-**Installation Suricata + règle de labo** (sur la VM à surveiller) :
+**Install Suricata and a lab rule** (on the monitored VM):
 
-Installez Suricata (IDS) et Apache (cible HTTP du test), puis démarrez Apache pour que le stimulus HTTP ait un service derrière.
+Install Suricata (the IDS) and Apache (the HTTP target of the test), then start Apache so the HTTP request has a service behind it.
 
 ```bash
 sudo apt install -y suricata
-# Apache doit être actif pour le test HTTP ci-dessous
+# Apache must be running for the HTTP test below
 sudo apt install -y apache2
 sudo systemctl enable --now apache2
 ```
 
-Écrivez une règle de labo dans le répertoire des règles Debian : `tee` crée le fichier avec le contenu entre `EOF` (heredoc).
+Write a lab rule into Debian's rules directory. `tee` creates the file from the text between `EOF` (a heredoc).
 
 ```bash
 sudo tee /var/lib/suricata/rules/lab-test.rules <<'EOF'
-# Règle de labo défensive — alerte sur requête HTTP vers /esaip-lab-test
+# Defensive lab rule — alert on HTTP requests to /esaip-lab-test
 alert http any any -> $HOME_NET any (msg:"ESAIP-LAB-HTTP-TEST"; http.uri; content:"/esaip-lab-test"; sid:9000001; rev:1;)
 EOF
 ```
 
-- `<<'EOF'` : lit le texte jusqu’à la ligne `EOF` (guillemets simples = pas d’interpolation shell).
-- `sid:9000001` : identifiant unique de la règle (évite les collisions avec les règles officielles).
+- `<<'EOF'`: read until a line that is exactly `EOF`. Single quotes mean the shell does not expand variables.
+- `sid:9000001`: a unique rule id, so it does not collide with official rules.
 
-Dans `/etc/suricata/suricata.yaml`, vérifiez que `af-packet` écoute **`eth0`** (pas seulement `lo`) et que `rule-files` charge au moins `lab-test.rules` :
+In `/etc/suricata/suricata.yaml`, check that `af-packet` listens on **`eth0`** (not only `lo`) and that `rule-files` loads at least `lab-test.rules`:
 
 ```yaml
 rule-files:
   - lab-test.rules
 ```
 
-Démarrez Suricata et contrôlez qu’il est actif : sans service démarré, aucune alerte ne sera écrite dans `eve.json`.
+Start Suricata and confirm it is active. If the service is down, nothing is written to `eve.json`.
 
 ```bash
 sudo systemctl enable --now suricata
 sudo systemctl status suricata
 ```
 
-Les alertes sont dans `/var/log/suricata/eve.json`. Les règles gérées par `suricata-update` vivent sous `/var/lib/suricata/rules`.
+Alerts are in `/var/log/suricata/eve.json`. Rules managed by `suricata-update` live under `/var/lib/suricata/rules`.
 
-**Générer une alerte qui traverse vraiment eth0** : un `curl` vers `localhost` sur la VM surveillée ne produit **pas** de trafic sur `eth0`. Lancez le stimulus **depuis une autre machine du labo** (ex. le SIEM) :
+**Raise an alert that really crosses eth0**. A `curl` to `localhost` on the monitored VM does **not** produce traffic on `eth0`. Send the request **from another lab machine** (for example the SIEM):
 
 ```bash
-# Depuis la VM SIEM (remplacez IP_SURVEILLEE)
-curl -s -o /dev/null -w "%{http_code}\n" http://IP_SURVEILLEE/esaip-lab-test
+# From the SIEM VM (replace IP_MONITORED)
+curl -s -o /dev/null -w "%{http_code}\n" http://IP_MONITORED/esaip-lab-test
 ```
 
-- `-s` : mode silencieux ; `-o /dev/null` : jette le corps de la réponse ; `-w "%{http_code}\n"` : affiche seulement le code HTTP.
-- `IP_SURVEILLEE` : IP de la VM à surveiller (pas `localhost`, pas l’IP du SIEM).
+- `-s`: quiet; `-o /dev/null`: discard the response body; `-w "%{http_code}\n"`: print only the HTTP status code.
+- `IP_MONITORED`: the monitored VM's address. Not `localhost`, and not the SIEM's own address.
 
-Un code HTTP `404` est normal (l’URL n’existe pas sur Apache) : Suricata doit tout de même lever `ESAIP-LAB-HTTP-TEST` (`in_iface: eth0`). Vérifiez ensuite dans Kibana : `event.module: "suricata" and event.kind: "alert"` (signature : `rule.name`).
+HTTP `404` is normal (that URL does not exist in Apache). Suricata must still raise `ESAIP-LAB-HTTP-TEST` (`in_iface: eth0`). Then check Kibana: `event.module: "suricata" and event.kind: "alert"` (signature field: `rule.name`).
 
-#### Étape 5 : Démarrage de Filebeat
+#### Step 5: Start Filebeat
 
-Activez et démarrez Filebeat pour qu’il envoie en continu auth, Apache et Suricata vers Elasticsearch.
+Enable and start Filebeat so it keeps shipping auth, Apache and Suricata events to Elasticsearch.
 
 ```bash
 sudo systemctl enable --now filebeat
 sudo systemctl status filebeat
 ```
 
-Les index / data streams : `.ds-filebeat-*` (pattern Kibana : `filebeat-*`).
+Indexes / data streams: `.ds-filebeat-*` (Kibana pattern: `filebeat-*`).
 
-#### Étape 6 : Vérification dans Kibana
+#### Step 6: Check in Kibana
 
-1. Accédez à Kibana : `http://IP_SIEM:5601`
-2. **Stack Management → Data Views** → pattern `filebeat-*`, champ `@timestamp`
-3. Dans **Discover**, filtrez :
-   - Alertes Suricata : `event.module: "suricata" and event.kind: "alert"` (champ signature : `rule.name`)
-   - SSH / auth : `event.dataset: "system.auth"`
-   - Apache : `event.dataset: "apache.access"`
+1. Open Kibana: `http://IP_SIEM:5601` (login `elastic`)
+2. **Stack Management → Data Views** → pattern `filebeat-*`, time field `@timestamp`
+3. In **Discover**, filter:
+   - Suricata alerts: `event.module: "suricata" and event.kind: "alert"` (signature field: `rule.name`)
+   - SSH / auth: `event.dataset: "system.auth"`
+   - Apache: `event.dataset: "apache.access"`
 
-#### Apache (service)
+#### Apache (the service)
 
-Si Apache n’est pas encore installé sur la VM à surveiller, installez-le, démarrez-le et générez une requête locale pour produire des lignes `access.log` que Filebeat enverra au SIEM.
+If Apache is not installed yet on the monitored VM, install it, start it, and send a local request. That produces `access.log` lines for Filebeat to ship to the SIEM.
 
 ```bash
 sudo apt install -y apache2
@@ -1024,63 +1036,63 @@ sudo systemctl enable --now apache2
 curl http://localhost
 ```
 
-Générez du trafic, puis vérifiez `apache.access` dans Discover.
+Generate some traffic, then check `apache.access` in Discover.
 
-> **Note Logstash / Apache** : le pipeline Logstash `apache.conf` du §2.4 (lecture locale de `/var/log/apache2` sur le SIEM) reste un exercice utile sur la VM SIEM. En architecture deux VMs, la collecte Apache **recommandée** est Filebeat module `apache` sur la VM à surveiller.
+> **Logstash / Apache**: the Logstash `apache.conf` pipeline in §2.4 (local read of `/var/log/apache2` on the SIEM) is still a useful exercise on the SIEM VM. In the two-VM layout, the **recommended** Apache collection is the Filebeat `apache` module on the monitored VM.
 
 ---
 
-### 3.2 Installation et configuration de Winlogbeat
+### 3.2 Install and configure Winlogbeat
 
-> **Où travailler** : sur votre **poste Windows** (PowerShell **en tant qu’administrateur**).  
-> Alignez la version Winlogbeat sur celle du SIEM.  
-> Remplacez `IP_SIEM` par l’adresse IP de la VM ELK.
+> **Where to work**: on your **Windows machine** (PowerShell **as administrator**).  
+> Match the Winlogbeat version to the SIEM.  
+> Replace `IP_SIEM` with the ELK VM's address.
 
-#### Étape 0 : Vérifier la connectivité vers Elasticsearch
+#### Step 0: Check connectivity to Elasticsearch
 
-Avant d’installer l’agent, confirmez que **ce** poste Windows joint le SIEM sur le port `9200` (sinon Winlogbeat installé mais muet).
+Before installing the agent, confirm that **this** Windows machine can reach the SIEM on port `9200`. Otherwise Winlogbeat installs and stays silent.
 
 ```powershell
-curl.exe -sk -u elastic:ELASTIC_PASS --cacert C:\path\to\http_ca.crt https://IP_SIEM:9200
-# Doit renvoyer un JSON (cluster.name, version.number, …)
+curl.exe -sk -u elastic:ELASTIC_PASS --cacert C:\\path\\to\\http_ca.crt https://IP_SIEM:9200
+# Must return JSON (cluster.name, version.number, …)
 
-# Quelle IP source Windows est utilisée ?
+# Which Windows source IP is used?
 Get-NetTCPConnection -RemoteAddress IP_SIEM -RemotePort 9200 |
   Select-Object LocalAddress, LocalPort, State
 ```
 
-- `curl.exe` : le client HTTP Windows (évite l’alias PowerShell `curl` = `Invoke-WebRequest`).
-- `Get-NetTCPConnection` : montre l’interface locale réellement utilisée vers le SIEM.
+- `curl.exe`: the Windows HTTP client. It avoids the PowerShell alias `curl`, which is `Invoke-WebRequest`.
+- `Get-NetTCPConnection`: shows the local interface actually used towards the SIEM.
 
-Un poste multi-homed (Wi-Fi + Ethernet) peut atteindre le SIEM via une interface différente de celle utilisée pour VNC ou le navigateur. Notez l’`LocalAddress` réellement utilisée.
+A multi-homed PC (Wi-Fi + Ethernet) may reach the SIEM on a different interface from the one used for VNC or the browser. Write down the `LocalAddress` that is really used.
 
-Si `curl` échoue : route (`Find-NetRoute -RemoteIPAddress IP_SIEM`), pare-feu Windows, et ouverture du port `9200` côté SIEM.
+If `curl` fails: check the route (`Find-NetRoute -RemoteIPAddress IP_SIEM`), the Windows firewall, and that port `9200` is open on the SIEM.
 
-#### Étape 1 : Téléchargement et extraction
+#### Step 1: Download and extract
 
-Téléchargez le ZIP Winlogbeat aligné sur la version du SIEM, extrayez-le, puis copiez les fichiers sous `Program Files` (emplacement standard du service).
+Download the Winlogbeat ZIP that matches the SIEM version, extract it, and copy the files under `Program Files` (the usual place for the service).
 
 ```powershell
-# PowerShell administrateur
+# Administrator PowerShell
 $ver = "9.5.4"
 Invoke-WebRequest -Uri "https://artifacts.elastic.co/downloads/beats/winlogbeat/winlogbeat-$ver-windows-x86_64.zip" -OutFile "$env:TEMP\winlogbeat.zip"
 Expand-Archive "$env:TEMP\winlogbeat.zip" -DestinationPath "$env:TEMP\winlogbeat-extract" -Force
-# Le ZIP crée un sous-dossier winlogbeat-9.5.4-windows-x86_64 — on le copie sous Program Files
+# The ZIP creates a winlogbeat-9.5.4-windows-x86_64 folder — copy that under Program Files
 New-Item -ItemType Directory -Path "C:\Program Files\Winlogbeat" -Force | Out-Null
 Copy-Item -Path "$env:TEMP\winlogbeat-extract\winlogbeat-$ver-windows-x86_64\*" -Destination "C:\Program Files\Winlogbeat" -Recurse -Force
 ```
 
-- `$ver` : version Winlogbeat (doit matcher le SIEM, ex. 9.5.4).
-- `Invoke-WebRequest` / `Expand-Archive` : téléchargement puis extraction du ZIP.
-- `| Out-Null` : masque la sortie de création du dossier.
+- `$ver`: Winlogbeat version. It must match the SIEM, for example 9.5.4.
+- `Invoke-WebRequest` / `Expand-Archive`: download, then extract the ZIP.
+- `| Out-Null`: hide the output of creating the directory.
 
-Alternative manuelle : https://www.elastic.co/downloads/beats/winlogbeat — extraire puis placer le contenu dans `C:\Program Files\Winlogbeat`.
+Manual alternative: https://www.elastic.co/downloads/beats/winlogbeat — extract, then put the contents in `C:\Program Files\Winlogbeat`.
 
-#### Étape 2 : Configuration (`winlogbeat.yml`)
+#### Step 2: Configuration (`winlogbeat.yml`)
 
-L’archive ZIP n’est pas sur les VMs Linux : le `winlogbeat.yml` livré suit le même modèle que Filebeat (`hosts: ["localhost:9200"]`, `#protocol: "https"`, auth commentée, lignes `#ssl` sous `#output.logstash`). Même geste que §3.1 : URL `https://`, compte `beats_writer`, bloc `ssl` sous `output.elasticsearch`. Ne décommentez pas le SSL Logstash.
+The ZIP is not on the Linux VMs. The shipped `winlogbeat.yml` follows the same pattern as Filebeat (`hosts: ["localhost:9200"]`, `#protocol: "https"`, commented auth, `#ssl` lines under `#output.logstash`). Same edit as §3.1: `https://` URL, `beats_writer`, an `ssl` block under `output.elasticsearch`. Do not uncomment the Logstash SSL lines.
 
-Éditez `C:\Program Files\Winlogbeat\winlogbeat.yml` (Bloc-notes ou VS Code) et configurez au minimum les journaux Application / System / Security et la sortie vers le SIEM :
+Edit `C:\Program Files\Winlogbeat\winlogbeat.yml` (Notepad or VS Code). At minimum, collect Application, System and Security, and send them to the SIEM:
 
 ```yaml
 winlogbeat.event_logs:
@@ -1101,10 +1113,9 @@ output.elasticsearch:
     verification_mode: full
 ```
 
-Copiez `http_ca.crt` depuis le SIEM sur le PC Windows et adaptez le chemin.  
-`ignore_older: 72h` : ne renvoie pas les événements plus vieux que 72 h (évite un flood au premier démarrage).
+`ignore_older: 72h`: do not ship events older than 72 hours. That avoids a flood on the first start.
 
-Puis validez la syntaxe YAML, la connexion Elasticsearch et la version de l’agent :
+Then check the YAML, the Elasticsearch connection, and the agent version:
 
 ```powershell
 cd "C:\Program Files\Winlogbeat"
@@ -1113,21 +1124,21 @@ cd "C:\Program Files\Winlogbeat"
 .\winlogbeat.exe version
 ```
 
-`-c .\winlogbeat.yml` : chemin explicite du fichier de configuration.
+`-c .\winlogbeat.yml`: explicit path to the configuration file.
 
-#### Étape 3 : Installation et démarrage du service
+#### Step 3: Install and start the service
 
-Enregistrez Winlogbeat comme service Windows (`ExecutionPolicy Bypass` autorise l’exécution du script fourni), puis démarrez-le et vérifiez le statut.
+Register Winlogbeat as a Windows service (`ExecutionPolicy Bypass` lets the supplied script run), then start it and check the status.
 
 ```powershell
 cd "C:\Program Files\Winlogbeat"
 PowerShell.exe -ExecutionPolicy Bypass -File .\install-service-winlogbeat.ps1
 Start-Service winlogbeat
 Get-Service winlogbeat
-# Attendu : Status = Running, StartType = Automatic
+# Expected: Status = Running, StartType = Automatic
 ```
 
-Si le script d’installation est absent, créez le service manuellement (chemin binaire + config + `path.home`) :
+If the install script is missing, create the service by hand (binary path, config, and `path.home`):
 
 ```powershell
 New-Service -Name "winlogbeat" `
@@ -1136,37 +1147,37 @@ New-Service -Name "winlogbeat" `
 Start-Service winlogbeat
 ```
 
-#### Étape 4 : Générer un événement Security de test (bénin)
+#### Step 4: Generate a benign Security test event
 
-Pour avoir au moins un échec de connexion visible (`4625`) en plus des `4624` naturels, provoquez un échec d’auth local bénin, puis (optionnel) un événement Application de contrôle.
+To see at least one failed logon (`4625`) in addition to the natural `4624` events, cause a harmless local authentication failure, then optionally write a control event in the Application log.
 
 ```powershell
-# Échec d’auth local bénin (génère souvent un EventID 4625)
+# Harmless local auth failure (often produces EventID 4625)
 net use \\127.0.0.1\IPC$ /user:baduser WrongPass123
-# Événement Application de contrôle (optionnel)
+# Control event in the Application log (optional)
 eventcreate /T INFORMATION /ID 1000 /L APPLICATION /D "Test SIEM Winlogbeat"
 ```
 
-- `net use ... /user:baduser` : tentative volontairement invalide → souvent EventID **4625**.
-- `eventcreate` : écrit un événement Application facilement filtrable dans Kibana.
+- `net use ... /user:baduser`: a deliberately invalid attempt, which often becomes EventID **4625**.
+- `eventcreate`: writes an Application event that is easy to filter in Kibana.
 
-#### Étape 5 : Vérification dans Kibana
+#### Step 5: Check in Kibana
 
-1. Attendez une minute que les événements partent
-2. Data view : `winlogbeat-*` (champ temporel `@timestamp`)
-3. Dans **Discover**, filtres utiles :
-   - Connexions réussies : `winlog.event_id: 4624`
-   - Échecs de connexion : `winlog.event_id: 4625`
-   - Canal Security : `winlog.channel: "Security"`
-4. Data streams : `.ds-winlogbeat-*` (pattern Kibana : `winlogbeat-*`)
+1. Wait about a minute for events to ship
+2. Data view: `winlogbeat-*` (time field `@timestamp`)
+3. In **Discover**, useful filters:
+   - Successful logons: `winlog.event_id: 4624`
+   - Failed logons: `winlog.event_id: 4625`
+   - Security channel: `winlog.channel: "Security"`
+4. Data streams: `.ds-winlogbeat-*` (Kibana pattern: `winlogbeat-*`)
 
-**Vérification** : documents Application / System / Security présents ; agent.version aligné sur le SIEM.
+**Check**: Application, System and Security documents are present, and `agent.version` matches the SIEM.
 
-#### Filtrage des événements critiques (optionnel)
+#### Filter to a few Security event IDs (optional)
 
-**Objectif** : ne conserver que certains EventID Security.
+**Goal**: keep only some Security event IDs.
 
-**Exemple** :
+**Example**:
 
 ```yaml
 winlogbeat.event_logs:
@@ -1188,31 +1199,31 @@ winlogbeat.event_logs:
                     winlog.event_id: 4719
 ```
 
-Redémarrez le service pour appliquer le filtre : `Restart-Service winlogbeat`.
+Restart the service so the filter applies: `Restart-Service winlogbeat`.
 
 ---
 
-### 3.3 Installation et configuration de Metricbeat
+### 3.3 Install and configure Metricbeat
 
-#### Étape 1 : Installation de Metricbeat
+#### Step 1: Install Metricbeat
 
-Sur la **VM à surveiller**, installez Metricbeat pour collecter CPU, mémoire, disque, réseau, etc. et les envoyer au SIEM.
+On the **monitored VM**, install Metricbeat to collect CPU, memory, disk, network and the rest, and send them to the SIEM.
 
 ```bash
 sudo apt install -y metricbeat
 ```
 
-#### Étape 2 : Configuration de base
+#### Step 2: Basic configuration
 
-Même logique que Filebeat : le `metricbeat.yml` du paquet pointe vers `localhost:9200`, avec `#protocol: "https"` et auth commentés. Éditez **`output.elasticsearch`** seulement (ne décommentez pas le SSL sous `#output.logstash:`).
+Same idea as Filebeat: the package `metricbeat.yml` points at `localhost:9200`, with `#protocol: "https"` and auth commented. Edit **`output.elasticsearch` only** (do not uncomment SSL under `#output.logstash:`).
 
-Conservez `metricbeat.config.modules`, `setup.template.settings` et `processors`. N’ajoutez pas de second bloc `metricbeat.modules:` dans ce fichier : le module `system` vient de `modules.d/system.yml` (cpu, load, memory, network, process, `socket_summary`, filesystem). Un bloc en plus collecte les mêmes métriques une seconde fois.
+Keep `metricbeat.config.modules`, `setup.template.settings` and `processors`. Do not add a second `metricbeat.modules:` block in this file: the `system` module comes from `modules.d/system.yml` (cpu, load, memory, network, process, `socket_summary`, filesystem). An extra block collects the same metrics twice.
 
 ```bash
 sudo nano /etc/metricbeat/metricbeat.yml
 ```
 
-Même CA / utilisateur que Filebeat :
+Same CA / user as Filebeat:
 
 ```yaml
 output.elasticsearch:
@@ -1225,26 +1236,26 @@ output.elasticsearch:
     verification_mode: full
 ```
 
-Vérifiez : `sudo metricbeat test output`.
-#### Étape 3 : Activation des modules système
+Check with `sudo metricbeat test output`.
+#### Step 3: Enable the system module
 
-Activez le module `system` (métriques hôte) — sans cela, Metricbeat tourne mais n’envoie presque rien d’utile pour le dashboard labo.
+Enable the `system` module (host metrics). Without it, Metricbeat runs but sends almost nothing useful for the lab dashboard.
 
 ```bash
 sudo metricbeat modules enable system
 ```
 
-#### Étape 4 : Configuration du module système
+#### Step 4: System module configuration
 
-Le module système collecte par défaut CPU, mémoire, disque, réseau, processus, filesystem. La configuration par défaut suffit en général ; ouvrez le fichier seulement si vous voulez ajuster les périodes ou désactiver un jeu de métriques :
+By default the system module collects CPU, memory, disk, network, processes and filesystem. The default file is enough. Open it only if you want to change periods or turn a metric set off:
 
 ```bash
 sudo nano /etc/metricbeat/modules.d/system.yml
 ```
 
-#### Étape 5 : Démarrage de Metricbeat
+#### Step 5: Start Metricbeat
 
-Activez et démarrez le service, contrôlez son statut, puis testez la connexion vers Elasticsearch.
+Enable and start the service, check its status, then test the connection to Elasticsearch.
 
 ```bash
 sudo systemctl enable --now metricbeat
@@ -1252,23 +1263,23 @@ sudo systemctl status metricbeat
 sudo metricbeat test output
 ```
 
-Data streams : `.ds-metricbeat-*` (pattern Kibana : `metricbeat-*`).
+Data streams: `.ds-metricbeat-*` (Kibana pattern: `metricbeat-*`).
 
-#### Étape 6 : Vérification dans Kibana
+#### Step 6: Check in Kibana
 
-1. Créez une data view : `metricbeat-*` (`@timestamp`)
-2. Explorez dans **Discover** (`event.dataset: system.cpu`, `system.memory`, …)
-3. Ouvrez (ou créez) votre dashboard métriques (voir §4.3)
+1. Create a data view: `metricbeat-*` (`@timestamp`)
+2. Explore in **Discover** (`event.dataset: system.cpu`, `system.memory`, …)
+3. Open (or create) your metrics dashboard (see §4.3)
 
 ---
 
-### 3.4 Packetbeat (optionnel — hors checklist Linux)
+### 3.4 Packetbeat (optional — not on the Linux checklist)
 
-> **Optionnel** : Packetbeat **n’est pas** une étape obligatoire de la séance Linux.  
-> Filebeat (Suricata / auth / Apache) + Metricbeat suffisent pour le livrable.  
-> Ne l’activez que si vous avez de la RAM et du temps ; il nécessite des privilèges élevés et peut être gourmand.
+> **Optional**: Packetbeat is **not** a required step of the Linux session.  
+> Filebeat (Suricata / auth / Apache) + Metricbeat are enough for the deliverable.  
+> Turn it on only if you have RAM and time left. It needs extra privileges and can be heavy.
 
-Si vous le tentez malgré tout, installez Packetbeat et éditez sa config (interface + protocoles + sortie SIEM) :
+If you still want to try it, install Packetbeat and edit its config (interface, protocols, SIEM output):
 
 ```bash
 sudo apt install -y packetbeat
@@ -1290,174 +1301,174 @@ output.elasticsearch:
     verification_mode: full
 ```
 
-Copiez aussi la CA dans `/etc/packetbeat/certs/`.  
-`device: any` : écoute sur toutes les interfaces (gourmand en CPU/RAM).
+Also copy the CA into `/etc/packetbeat/certs/`.  
+`device: any`: listen on every interface. That costs CPU and RAM.
 
-Démarrez le service pour commencer à envoyer le trafic capturé vers Elasticsearch :
+Start the service so captured traffic is sent to Elasticsearch:
 
 ```bash
 sudo systemctl enable --now packetbeat
 ```
 
-Vérification : data view `packetbeat-*` dans Kibana.
+Check: data view `packetbeat-*` in Kibana.
 
 ---
 
-## 4. Partie 3 : Visualisation et analyse dans Kibana
+## 4. Part 3: Visualise and analyse in Kibana
 
-### 4.1 Création de data views
+### 4.1 Create data views
 
-#### Étape 1 : Accès aux data views
+#### Step 1: Open data views
 
-1. Dans Kibana, allez dans **Stack Management → Data Views**
-2. Cliquez sur **Create data view**
+1. In Kibana, go to **Stack Management → Data Views**
+2. Click **Create data view**
 
-#### Étape 2 : Création d'une data view pour Filebeat
+#### Step 2: Filebeat data view
 
-1. Entrez le pattern : `filebeat-*`
-2. Cliquez sur **Next step**
-3. Sélectionnez le champ timestamp : `@timestamp`
-4. Cliquez sur **Create data view**
+1. Name pattern: `filebeat-*`
+2. Click **Next step**
+3. Timestamp field: `@timestamp`
+4. Click **Create data view**
 
-#### Étape 3 : Création d'autres data views
+#### Step 3: The other data views
 
-Répétez pour :
+Repeat for:
 - `winlogbeat-*`
 - `metricbeat-*`
-- `packetbeat-*` (si installé)
+- `packetbeat-*` (if installed)
 
-### 4.2 Création de visualisations de base
+### 4.2 Basic visualisations
 
-#### Visualisation 1 : Graphique temporel des logs
+#### Visualisation 1: Logs over time
 
-1. Allez dans **Dashboard** > **Create visualization**
-2. Choisissez **Line** (graphique linéaire)
-3. Sélectionnez la data view `filebeat-*`
-4. Configurez :
-   - **Y-axis** : Count
-   - **X-axis** : Date Histogram sur `@timestamp`
-5. Cliquez sur **Save** et donnez un nom : "Logs dans le temps"
+1. Go to **Dashboard** > **Create visualization**
+2. Choose **Line**
+3. Select the `filebeat-*` data view
+4. Configure:
+   - **Y-axis**: Count
+   - **X-axis**: Date Histogram on `@timestamp`
+5. Click **Save** and name it "Logs over time"
 
-#### Visualisation 2 : Top 10 des sources de logs
+#### Visualisation 2: Top 10 log sources
 
-1. Créez une nouvelle visualisation **Data Table**
-2. Sélectionnez `filebeat-*`
-3. Configurez :
-   - **Metric** : Count
-   - **Buckets** : Terms sur `host.name` (ou `source`)
-4. Limitez à 10 résultats
-5. Sauvegardez : "Top 10 sources de logs"
+1. Create a **Data Table** visualisation
+2. Select `filebeat-*`
+3. Configure:
+   - **Metric**: Count
+   - **Buckets**: Terms on `host.name` (or `source`)
+4. Limit to 10 results
+5. Save as "Top 10 log sources"
 
-#### Visualisation 3 : Répartition par type de log
+#### Visualisation 3: Breakdown by log type
 
-1. Créez une visualisation **Pie Chart**
-2. Sélectionnez `filebeat-*`
-3. Configurez :
-   - **Slice by** : Terms sur `fileset.name` ou `log.file.path`
-4. Sauvegardez : "Répartition des types de logs"
+1. Create a **Pie** visualisation
+2. Select `filebeat-*`
+3. Configure:
+   - **Slice by**: Terms on `fileset.name` or `log.file.path`
+4. Save as "Log types"
 
-### 4.3 Création d'un dashboard
+### 4.3 Build a dashboard
 
-#### Étape 1 : Création du dashboard
+#### Step 1: Create the dashboard
 
-1. Allez dans **Dashboard** > **Create dashboard**
-2. Cliquez sur **Add** pour ajouter des visualisations
-3. Ajoutez les visualisations créées précédemment
+1. Go to **Dashboard** > **Create dashboard**
+2. Click **Add** to add visualisations
+3. Add the visualisations you just saved
 
-#### Étape 2 : Organisation du dashboard
+#### Step 2: Lay it out
 
-- Organisez les visualisations de manière logique
-- Ajustez la taille des panneaux
-- Ajoutez un titre : "Dashboard SIEM - Vue d'ensemble"
+- Group the panels in an order you can explain
+- Resize the panels
+- Title: "SIEM dashboard — overview"
 
-#### Étape 3 : Sauvegarde
+#### Step 3: Save
 
-Sauvegardez le dashboard : "Dashboard SIEM Principal"
+Save the dashboard as "SIEM dashboard — main"
 
-#### Dashboards à construire vous-même
+#### Dashboards you build yourself
 
-Créez vos propres dashboards dans Kibana (**Analytics → Dashboard**). Ne comptez pas sur un import de fichiers fournis : sur Kibana **9.5**, `filebeat setup --dashboards` / `metricbeat setup --dashboards` échoue souvent (`fail to parse kibana version`), et ce n’est **pas** le livrable attendu.
+Create your own dashboards in Kibana (**Analytics → Dashboard**). Do **not** count on imported files from someone else: on Kibana **9.5**, `filebeat setup --dashboards` / `metricbeat setup --dashboards` often fails (`fail to parse kibana version`), and that is **not** the expected deliverable.
 
-Data views à créer (§4.1) : `filebeat-*`, `metricbeat-*`, `winlogbeat-*` (champ temporel `@timestamp`).
+Data views to create (§4.1): `filebeat-*`, `metricbeat-*`, `winlogbeat-*` (time field `@timestamp`).
 
-Cible minimale (noms libres, tant que le contenu est là) :
+Minimum target (any titles, as long as the content is there):
 
-| Dashboard | Sources | Panneaux / filtres utiles |
+| Dashboard | Sources | Useful panels / filters |
 | --- | --- | --- |
-| Vue Linux / sécurité | Suricata, SSH/auth, Apache, Metricbeat | `event.kind: "alert"`, `source.ip`, auth SSH, `http.response.status_code`, CPU/mémoire |
-| Métriques hôte | `metricbeat-*` | CPU, mémoire, load, disque `/`, réseau, processus (fenêtre ~24 h) |
+| Linux / security overview | Suricata, SSH/auth, Apache, Metricbeat | `event.kind: "alert"`, `source.ip`, SSH auth, `http.response.status_code`, CPU/memory |
+| Host metrics | `metricbeat-*` | CPU, memory, load, disk `/`, network, processes (~24 h window) |
 | Windows | `winlogbeat-*` | `winlog.event_id: 4624` / `4625`, `winlog.channel` |
-| GeoIP (si Suricata + trafic public) | `filebeat-*` | cartes `destination.geo.location` / `source.geo.location`, pays / IP |
+| GeoIP (if Suricata + public traffic) | `filebeat-*` | maps `destination.geo.location` / `source.geo.location`, country / IP |
 
-Astuce : en **Discover**, filtrez, **Save** la recherche, puis **Add from library** sur le dashboard.
+Tip: in **Discover**, filter, **Save** the search, then **Add from library** on the dashboard.
 
-### 4.4 Recherche et analyse de logs
+### 4.4 Search and analyse logs
 
-#### Recherche simple
+#### Simple search
 
-1. Allez dans **Discover**
-2. Sélectionnez la data view `filebeat-*`
-3. Utilisez la barre de recherche pour filtrer :
-   - `status:error` (logs d'erreur)
-   - `message:*failed*` (messages contenant "failed")
-   - `@timestamp:[now-1h TO now]` (dernière heure)
+1. Go to **Discover**
+2. Select the `filebeat-*` data view
+3. Use the search bar:
+   - `status:error` (error logs)
+   - `message:*failed*` (messages containing "failed")
+   - `@timestamp:[now-1h TO now]` (last hour)
 
-#### Recherche avancée avec KQL
+#### Advanced search with KQL
 
-Utilisez la syntaxe KQL (Kibana Query Language) :
+KQL is the Kibana Query Language:
 
 ```
-host.name: "nom-serveur" and message: "error"
+host.name: "server-name" and message: "error"
 ```
 
 ```
 @timestamp >= "now-24h" and log.level: "error"
 ```
 
-#### Analyse de corrélation
+#### Correlation
 
-1. Recherchez des patterns suspects :
-   - Plusieurs échecs de connexion : `event.action: "authentication_failure"`
-   - Tentatives d'accès à des fichiers sensibles
-   - Activité réseau suspecte
+1. Look for suspicious patterns:
+   - Repeated authentication failures: `event.action: "authentication_failure"`
+   - Attempts to open sensitive files
+   - Unusual network activity
 
-2. Utilisez les filtres pour affiner votre recherche
+2. Use filters to narrow the search
 
-### 4.5 Dashboard de sécurité avec alertes
+### 4.5 Security dashboard
 
-**Tâche (partie Linux)** — créez un dashboard « Sécurité Linux » avec au minimum :
-- Alertes Suricata dans le temps (`event.kind: "alert"`, breakdown `rule.name`)
-- Top IP sources (`source.ip`)
-- Événements `system.auth` (SSH)
-- Accès Apache (`http.response.status_code`)
-- Métriques Metricbeat (CPU / mémoire)
+**Task (Linux)** — build a "Linux security" dashboard with at least:
+- Suricata alerts over time (`event.kind: "alert"`, breakdown on `rule.name`)
+- Top source IPs (`source.ip`)
+- `system.auth` events (SSH)
+- Apache access (`http.response.status_code`)
+- Metricbeat metrics (CPU / memory)
 
-**Tâche (partie Windows — Winlogbeat §3.2)** — créez un dashboard Windows avec :
-- Connexions réussies (`winlog.event_id: 4624`)
-- Échecs d’authentification (`winlog.event_id: 4625`)
-- Journal Security / répartition des canaux (`winlog.channel`)
-- Hôte source (`host.name`)
+**Task (Windows — Winlogbeat §3.2)** — build a Windows dashboard with:
+- Successful logons (`winlog.event_id: 4624`)
+- Authentication failures (`winlog.event_id: 4625`)
+- Security log / channel breakdown (`winlog.channel`)
+- Source host (`host.name`)
 
-Vérifiez que les panneaux affichent des documents. Alertes Kibana (seuils) : optionnel selon licence / version.
+Check that the panels show documents. Optional Kibana alerts (thresholds) depend on licence / version.
 
-**Indice** : champs Windows `winlog.event_id`, `winlog.channel` ; champs Suricata ECS `rule.name`, `event.kind`.
+**Hint**: Windows fields `winlog.event_id`, `winlog.channel`; Suricata ECS fields `rule.name`, `event.kind`.
 
-### 4.6 Carte GeoIP : où part le trafic, qui arrive
+### 4.6 GeoIP map: where traffic goes, who arrives
 
-Le pipeline d’ingest Filebeat du module Suricata (`filebeat-*-suricata-eve-pipeline`) applique déjà un processeur **GeoIP** sur `source.ip` et `destination.ip`. Elasticsearch tient à jour les bases GeoLite2 (City, Country, ASN). Il n’y a pas de compte MaxMind à créer.
+The Filebeat Suricata ingest pipeline (`filebeat-*-suricata-eve-pipeline`) already runs a **GeoIP** processor on `source.ip` and `destination.ip`. Elasticsearch keeps the GeoLite2 databases up to date (City, Country, ASN). You do not create a MaxMind account.
 
-Les adresses privées (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) ne reçoivent pas de coordonnées. Sur la carte, seuls les points publics apparaissent :
+Private addresses (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) get no coordinates. Only public addresses show up on the map:
 
-- trafic **sortant** : `destination.geo.location` (la source est la VM, donc privée) ;
-- connexions **vers la VM** : `source.geo.location` (la destination est la VM, donc privée).
+- **outbound** traffic: `destination.geo.location` (the source is the VM, so it is private);
+- connections **to the VM**: `source.geo.location` (the destination is the VM, so it is private).
 
-Créez un dashboard GeoIP (data view `filebeat-*`, fenêtre ~24 h) avec au minimum : une carte destinations (`destination.geo.location`), une carte sources (`source.geo.location`), des tableaux pays/IP destination et source, et (si présent) les alertes `rule.name: "ESAIP-LAB-SSH-PROBE"`.
+Build a GeoIP dashboard (data view `filebeat-*`, ~24 h window) with at least: a destination map (`destination.geo.location`), a source map (`source.geo.location`), destination/source country and IP tables, and (if present) alerts `rule.name: "ESAIP-LAB-SSH-PROBE"`.
 
-Un site web hébergé derrière un CDN se géolocalise souvent aux États-Unis ou en France, pas dans le pays du nom de domaine. Le pays affiché est celui de l’adresse IP réellement contactée.
+A website behind a CDN often geolocates to the United States or France, not to the country in the domain name. The country on the map is the country of the IP that was actually contacted.
 
-#### Trafic sortant
+#### Outbound traffic
 
-Lancez les requêtes **depuis la VM à surveiller**. Un `curl` vers `localhost` ne passe pas par `eth0`, donc Suricata ne le voit pas.
+Run the requests **from the monitored VM**. A `curl` to `localhost` does not cross `eth0`, so Suricata does not see it.
 
 ```bash
 for h in \
@@ -1476,28 +1487,28 @@ do
 done
 ```
 
-- `-L` : suit les redirections ; `--max-redirs 2` : s’arrête après deux sauts.
-- Un code HTTP quelconque (même `403` ou un échec TLS après le SYN) suffit : Suricata enregistre le flux, et le pipeline remplit `destination.geo.*`.
+- `-L`: follow redirects; `--max-redirs 2`: stop after two hops.
+- Any HTTP status (even `403`, or a TLS failure after the SYN) is enough: Suricata records the flow, and the pipeline fills `destination.geo.*`.
 
-Contrôle dans Discover : `event.dataset: "suricata.eve" and source.ip: "IP_SURVEILLEE" and destination.geo.country_name: *`.
+Check in Discover: `event.dataset: "suricata.eve" and source.ip: "IP_SURVEILLEE" and destination.geo.country_name: *`.
 
-#### Connexions entrantes
+#### Inbound connections
 
-La VM n’est pas joignable depuis Internet. Pour avoir des points « qui se connecte », on envoie **quelques SYN TCP vers le port 22 de la VM surveillée seulement**, avec une adresse source publique dans l’en-tête IP. Le handshake ne se termine pas : aucun mot de passe n’est essayé, et `sshd` ne voit pas de session.
+The VM is not reachable from the Internet. To plot “who connects”, send **a few TCP SYNs to port 22 of the monitored VM only**, with a public address in the IP source field. The handshake does not complete: no password is tried, and `sshd` never sees a session.
 
-Vérifiez d’abord qu’aucune règle ne va jeter ces paquets :
+Check first that nothing will drop these packets:
 
-- Suricata est en IDS : dans `/etc/suricata/suricata.yaml`, `copy-mode: ips` reste commenté, `af-packet` écoute `eth0`.
-- `rule-files` ne charge que des règles `alert` (pas de `drop` / `reject` actif).
-- UFW est inactif et la politique iptables est `ACCEPT`.
+- Suricata stays in IDS mode: in `/etc/suricata/suricata.yaml`, `copy-mode: ips` stays commented, and `af-packet` listens on `eth0`.
+- `rule-files` loads only `alert` rules (no active `drop` / `reject`).
+- UFW is inactive and the iptables policy is `ACCEPT`.
 
-Ajoutez une alerte de labo, pas un blocage. Fichier `/var/lib/suricata/rules/lab-geo.rules` :
+Add a lab alert, not a block. File `/var/lib/suricata/rules/lab-geo.rules`:
 
 ```
 alert tcp !$HOME_NET any -> $HOME_NET 22 (msg:"ESAIP-LAB-SSH-PROBE"; flags:S; sid:9000002; rev:1;)
 ```
 
-Dans `rule-files`, à côté de `lab-test.rules` :
+In `rule-files`, next to `lab-test.rules`:
 
 ```yaml
 rule-files:
@@ -1505,12 +1516,12 @@ rule-files:
   - lab-geo.rules
 ```
 
-Puis `sudo suricatasc -c reload-rules`. `$HOME_NET` contient déjà `10.0.0.0/8` et `172.16.0.0/12` : un SSH réel depuis le réseau du labo ne matche pas. Suricata peut prévenir que le sens « vers le client » est ignoré pour un simple SYN ; les SYN vers le serveur restent détectés.
+Then `sudo suricatasc -c reload-rules`. `$HOME_NET` already includes `10.0.0.0/8` and `172.16.0.0/12`, so a real SSH session from the lab network does not match. Suricata may warn that the to-client direction is ignored for a bare SYN; SYNs toward the server are still detected.
 
-Depuis le poste de travail, forger l’adresse source exige les droits root (`nping` : `Mode TCP requires root privileges`), et la passerelle du campus peut jeter un paquet dont la source n’est pas celle du poste. Émettez les SYN **depuis la VM SIEM**, sur le même LAN que la sonde, uniquement vers `IP_SURVEILLEE` port 22. Trois SYN par adresse suffisent.
+From the workstation, forging the source address needs root (`nping` reports `Mode TCP requires root privileges`), and the campus gateway may drop a packet whose source is not the workstation’s own address. Send the SYNs **from the SIEM VM**, on the same LAN as the sensor, only toward `IP_SURVEILLEE` port 22. Three SYNs per address are enough.
 
 ```bash
-# Sur la VM SIEM, en root. Remplacez IP_SURVEILLEE.
+# On the SIEM VM, as root. Replace IP_SURVEILLEE.
 sudo python3 - << 'PY'
 import socket, struct, random, time
 dst = "IP_SURVEILLEE"
@@ -1539,433 +1550,433 @@ for src in sources:
         tcp = struct.pack("!HHLLBBHHH", 41000 + n, 22, seq, 0, 5 << 4, 2, 65535, checksum(pseudo + tcp), 0)
         sock.sendto(ip + tcp, (dst, 0))
         time.sleep(0.02)
-print("envoyé", 3 * len(sources))
+print("sent", 3 * len(sources))
 PY
 ```
 
-Contrôle sur la sonde : `tcpdump -ni eth0 'tcp dst port 22'` voit les SYN, et `eve.json` contient `ESAIP-LAB-SSH-PROBE`. Dans Kibana : `rule.name: "ESAIP-LAB-SSH-PROBE" and source.geo.country_name: *`.
+On the sensor, `tcpdump -ni eth0 'tcp dst port 22'` shows the SYNs, and `eve.json` contains `ESAIP-LAB-SSH-PROBE`. In Kibana: `rule.name: "ESAIP-LAB-SSH-PROBE" and source.geo.country_name: *`.
 
 ---
 
-## 5. Partie 4 : Cas d'usage pratique
+## 5. Part 4: Practical case
 
-### 5.1 Scénario : Détection d'une tentative d'intrusion
+### 5.1 Scenario: spot an intrusion attempt
 
-#### Contexte
+#### Context
 
-Vous êtes administrateur système et vous devez analyser les logs pour détecter une activité suspecte. Un utilisateur signale des connexions étranges à un serveur.
+You are the system administrator. You have to read the logs and decide whether something suspicious happened. A user reports odd connections to a server.
 
-#### Données disponibles
+#### Data you already have
 
-Vous avez accès aux logs suivants :
-- Logs système (Filebeat)
-- Événements Windows (Winlogbeat)
-- Métriques système (Metricbeat)
+- System logs (Filebeat)
+- Windows events (Winlogbeat)
+- Host metrics (Metricbeat)
+- Suricata alerts, if you finished §3.1
 
 #### Mission
 
-Identifiez les signes d'une tentative d'intrusion en analysant les logs.
+Find the signs of an intrusion attempt by reading those logs. Use the events this lab already produced. Do not invent a second attack.
 
-### 5.2 Analyse de logs corrélés
+### 5.2 Correlate the logs
 
-#### Étape 1 : Recherche d'échecs d'authentification
+#### Step 1: Authentication failures
 
-1. Dans Kibana, allez dans **Discover**
-2. Sélectionnez la data view `winlogbeat-*`
-3. Recherchez les échecs de connexion :
+1. In Kibana, open **Discover**
+2. Select the `winlogbeat-*` data view
+3. Search for failed logons:
 
 ```
 winlog.event_id: 4625
 ```
 
-4. Analysez :
-   - Nombre d'échecs
-   - IP sources
-   - Comptes ciblés
-   - Période d'activité
+4. Look at:
+   - How many failures
+   - Source IPs
+   - Targeted accounts
+   - When they happened
 
-#### Étape 2 : Recherche d'activité réseau suspecte
+#### Step 2: Network activity
 
-1. Si Packetbeat est installé, analysez le trafic réseau
-2. Recherchez :
-   - Connexions depuis des IP suspectes
-   - Ports non standard
-   - Volumes de trafic anormaux
+1. If Packetbeat is installed, look at the captured traffic
+2. Otherwise use the Suricata alert and Metricbeat network graphs
+3. Look for:
+   - Connections from unexpected addresses
+   - Unusual ports
+   - Traffic volume that does not match the rest of the lab
 
-#### Étape 3 : Analyse des logs système
+#### Step 3: System logs
 
-1. Dans `filebeat-*`, recherchez :
-   - Tentatives d'accès à des fichiers sensibles
-   - Modifications de configuration
-   - Exécution de commandes suspectes
+1. In `filebeat-*`, look for:
+   - Attempts to open sensitive files
+   - Configuration changes
+   - Commands you did not expect
 
-#### Étape 4 : Corrélation temporelle
+#### Step 4: Time correlation
 
-1. Utilisez le filtre temporel pour identifier les périodes d'activité suspecte
-2. Corrélez les événements entre différentes sources
-3. Identifiez les patterns d'attaque
+1. Use the time filter to isolate the busy window
+2. Line up events from Filebeat, Winlogbeat and Metricbeat
+3. Say what the sequence is, in order
 
-### 5.3 Création de règles de corrélation simples
+### 5.3 Simple correlation rules
 
-#### Règle 1 : Détection de brute force
+#### Rule 1: Brute force
 
-**Logique** : Plus de 5 échecs de connexion depuis la même IP en 10 minutes
+**Logic**: more than 5 failed logons from the same IP in 10 minutes.
 
-**Implémentation dans Kibana** :
-1. Créez une visualisation **Data Table**
-2. Configurez :
-   - **Metric** : Count
-   - **Buckets** : Terms sur `source.ip` (ou `winlog.event_data.IpAddress`)
-   - **Filter** : `winlog.event_id: 4625`
-3. Ajoutez un filtre temporel : `@timestamp:[now-10m TO now]`
-4. Identifiez les IP avec plus de 5 occurrences
+**In Kibana**:
+1. Create a **Data Table** visualisation
+2. Configure:
+   - **Metric**: Count
+   - **Buckets**: Terms on `source.ip` (or `winlog.event_data.IpAddress`)
+   - **Filter**: `winlog.event_id: 4625`
+3. Time filter: `@timestamp:[now-10m TO now]`
+4. Find IPs with more than 5 hits
 
-#### Règle 2 : Détection d'activité hors heures
+#### Rule 2: Activity outside office hours
 
-**Logique** : Connexions réussies en dehors des heures de bureau (ex: 22h-6h)
+**Logic**: successful logons outside office hours (for example 22:00–06:00).
 
-**Implémentation** :
-1. Recherchez les connexions réussies : `winlog.event_id: 4624`
-2. Filtrez par heure : `@timestamp:[now-24h TO now]`
-3. Analysez les heures de connexion
+**How**:
+1. Search successful logons: `winlog.event_id: 4624`
+2. Time filter: `@timestamp:[now-24h TO now]`
+3. Read the hours of those logons
 
-### 5.4 Identification d'un pattern suspect
+### 5.4 Tell the story of the events
 
-**Scénario** : les événements du TP sont votre matière. Reliez-les pour raconter ce qui s'est passé, au lieu d'enchaîner des écrans sans lien.
+**Scenario**: the lab events are your evidence. Connect them so you can say what happened, instead of clicking through screens that do not relate.
 
-**Tâche** : partez des événements déjà produits (alerte Suricata `ESAIP-LAB-HTTP-TEST`, lignes `system.auth`, échec Windows `4625`).
+**Task**: start from events you already produced (Suricata alert `ESAIP-LAB-HTTP-TEST`, `system.auth` lines, Windows failure `4625`).
 
-1. Dans Kibana, créez des recherches pour identifier :
-   - Les IP sources
-   - Les comptes ciblés
-   - Ce qui a déclenché l'événement (règle Suricata, échec d'authentification, etc.)
-   - La chronologie
-2. Rédigez un court rapport :
-   - Résumé
-   - Chronologie
-   - Ce que vous feriez ensuite (bloquer, investiguer, ignorer un test de labo)
-3. Présentez ces recherches dans un dashboard dédié
+1. In Kibana, save searches that show:
+   - Source IPs
+   - Targeted accounts
+   - What raised the event (Suricata rule, authentication failure, and so on)
+   - The timeline
+2. Write a short report:
+   - Summary
+   - Timeline
+   - What you would do next (block, investigate, or ignore a lab test)
+3. Put those searches on a dedicated dashboard
 
-**Indice** : Utilisez les fonctionnalités de sauvegarde de recherche dans Kibana pour documenter vos analyses.
+**Hint**: save the Discover searches so the report points at something you can reopen.
 
 ---
 
-## 6. Annexes
+## 6. Appendices
 
-### 6.1 Commandes utiles
+### 6.1 Useful commands
 
-Mémo rapide pour le dépannage en séance. Chaque bloc regroupe les gestes les plus fréquents (statut, redémarrage, logs, test).
+A short troubleshooting sheet for the session. Each block groups the usual actions (status, restart, logs, test).
 
 #### Elasticsearch
 
-Statut / redémarrage du service, suivi des logs (`-f` = follow), liste des index, suppression d’un index (irréversible) :
+Service status and restart, follow the logs (`-f` means follow), list indexes, delete an index (this cannot be undone):
 
 ```bash
-# Vérifier le statut
+# Status
 sudo systemctl status elasticsearch
 
-# Redémarrer
+# Restart
 sudo systemctl restart elasticsearch
 
-# Voir les logs
+# Logs
 sudo journalctl -u elasticsearch -f
 
-# Lister les index
+# List indexes
 curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_cat/indices?v
 
-# Supprimer un index (attention !)
-curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt -X DELETE https://localhost:9200/nom-index
+# Delete an index (careful)
+curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt -X DELETE https://localhost:9200/index-name
 ```
 
-- `_cat/indices?v` : vue tabulaire des index (`v` = en-têtes de colonnes).
-- `-X DELETE` : méthode HTTP DELETE — remplacez `nom-index` ; ne supprimez pas les index système (`.kibana*`, etc.) sans raison.
+- `_cat/indices?v`: table of indexes (`v` adds column headers).
+- `-X DELETE`: HTTP DELETE. Replace `index-name`. Do not delete system indexes (`.kibana*`, and so on) unless you mean to.
 
 #### Kibana
 
-Statut, redémarrage et logs du service Kibana :
+Status, restart and logs of the Kibana service:
 
 ```bash
-# Vérifier le statut
+# Status
 sudo systemctl status kibana
 
-# Redémarrer
+# Restart
 sudo systemctl restart kibana
 
-# Voir les logs
+# Logs
 sudo journalctl -u kibana -f
 ```
 
 #### Logstash
 
-Statut, redémarrage, test de config hors service (`-f` = fichier de pipeline ; `--config.test_and_exit` = valide puis quitte sans démarrer le pipeline), logs :
+Status, restart, config test outside the service (`-f` is the pipeline file; `--config.test_and_exit` checks the config and exits without starting the pipeline), logs:
 
 ```bash
-# Vérifier le statut
+# Status
 sudo systemctl status logstash
 
-# Redémarrer
+# Restart
 sudo systemctl restart logstash
 
-# Tester une configuration
+# Test a configuration
 sudo /usr/share/logstash/bin/logstash -f /etc/logstash/conf.d/test.conf --config.test_and_exit
 
-# Voir les logs
+# Logs
 sudo journalctl -u logstash -f
 ```
 
 #### Filebeat
 
-Statut, validation de la config YAML, liste des modules, logs :
+Status, YAML check, module list, logs:
 
 ```bash
-# Vérifier le statut
+# Status
 sudo systemctl status filebeat
 
-# Tester la configuration
+# Test the configuration
 sudo filebeat test config
 
-# Lister les modules
+# List modules
 sudo filebeat modules list
 
-# Voir les logs
+# Logs
 sudo journalctl -u filebeat -f
 ```
 
 #### Metricbeat
 
-Statut, validation de config, liste des modules :
+Status, config check, module list:
 
 ```bash
-# Vérifier le statut
+# Status
 sudo systemctl status metricbeat
 
-# Tester la configuration
+# Test the configuration
 sudo metricbeat test config
 
-# Lister les modules
+# List modules
 sudo metricbeat modules list
 ```
 
 #### Winlogbeat (Windows PowerShell)
 
-Statut du service, redémarrage, test de la config depuis le répertoire d’installation :
+Service status, restart, config test from the install directory:
 
 ```powershell
-# Vérifier le statut
+# Status
 Get-Service winlogbeat
 
-# Redémarrer
+# Restart
 Restart-Service winlogbeat
 
-# Tester la configuration
+# Test the configuration
 cd "C:\Program Files\Winlogbeat"
 .\winlogbeat.exe test config -c .\winlogbeat.yml
 ```
 
-### 6.2 Logstash 9 — options SSL obsolètes (output Elasticsearch)
+### 6.2 Logstash 9 — obsolete SSL options (Elasticsearch output)
 
-Sur Logstash 9.x, ces réglages **refusent le démarrage** du plugin. Le TP utilise déjà les nouveaux noms ; ne les remettez pas « comme dans un vieux tuto ».
+On Logstash 9.x these settings **prevent the plugin from starting**. This lab already uses the new names; do not put the old ones back from outdated tutorials.
 
-| Obsolète (ne plus utiliser) | Remplacer par |
+| Obsolete (do not use) | Replace with |
 | --- | --- |
-| `cacert` | `ssl_certificate_authorities` (liste de chemins PEM) |
+| `cacert` | `ssl_certificate_authorities` (list of PEM paths) |
 | `ssl => true` / `ssl => false` | `ssl_enabled => true` / `false` |
-| `ssl_certificate_verification` | `ssl_verification_mode` (`full` ou `none`) |
+| `ssl_certificate_verification` | `ssl_verification_mode` (`full` or `none`) |
 | `keystore` / `keystore_password` | `ssl_keystore_path` / `ssl_keystore_password` |
 | `truststore` / `truststore_password` | `ssl_truststore_path` / `ssl_truststore_password` |
 
-Toujours valides dans ce TP : `hosts`, `user`, `password`, `index`, `ssl_enabled`, `ssl_certificate_authorities`.
+Still valid in this lab: `hosts`, `user`, `password`, `index`, `ssl_enabled`, `ssl_certificate_authorities`.
 
-**Ne pas confondre** avec d’autres outils (syntaxe différente, toujours correcte) :
+**Do not confuse** with other tools (different syntax, still correct):
 - `curl --cacert …`
 - `elasticsearch-certutil --ca-cert …`
-- Beats / Winlogbeat : bloc YAML `ssl:` avec `enabled`, `certificate_authorities`, `verification_mode`
-- Kibana : `elasticsearch.ssl.certificateAuthorities`, `elasticsearch.ssl.verificationMode`
+- Beats / Winlogbeat: YAML `ssl:` block with `enabled`, `certificate_authorities`, `verification_mode`
+- Kibana: `elasticsearch.ssl.certificateAuthorities`, `elasticsearch.ssl.verificationMode`
 
-### 6.3 Dépannage
+### 6.3 Troubleshooting
 
-#### Problème : Elasticsearch ne démarre pas
+#### Problem: Elasticsearch does not start
 
-**Symptômes** : Service en état `failed` ou erreur de mémoire
+**Symptoms**: service `failed`, or a memory error.
 
-**Solutions** :
-1. Vérifiez les logs : `sudo journalctl -u elasticsearch -n 50`
-2. Vérifiez la mémoire disponible : `free -h`
-3. Réduisez le heap dans `/etc/elasticsearch/jvm.options`
-4. Vérifiez les permissions : `sudo chown -R elasticsearch:elasticsearch /var/lib/elasticsearch`
+**What to try**:
+1. Logs: `sudo journalctl -u elasticsearch -n 50`
+2. Free memory: `free -h`
+3. Lower the heap in `/etc/elasticsearch/jvm.options`
+4. Permissions: `sudo chown -R elasticsearch:elasticsearch /var/lib/elasticsearch`
 
-#### Problème : Kibana ne peut pas se connecter à Elasticsearch
+#### Problem: Kibana cannot connect to Elasticsearch
 
-**Symptômes** : Erreur "Unable to connect to Elasticsearch"
+**Symptoms**: "Unable to connect to Elasticsearch".
 
-**Solutions** :
-1. Vérifiez qu'Elasticsearch fonctionne : `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200`
-2. Vérifiez la configuration dans `kibana.yml` — la ligne `elasticsearch.hosts` doit être décommentée :
+**What to try**:
+1. Elasticsearch is up: `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200`
+2. In `kibana.yml`, `elasticsearch.hosts` must be uncommented:
 
    ```bash
    sudo grep "^elasticsearch.hosts" /etc/kibana/kibana.yml
    ```
 
-   La ligne doit être décommentée (sans `#` au début)
-3. Vérifiez les logs : `sudo journalctl -u kibana -n 50`
-4. Vérifiez le pare-feu
+   The line must not start with `#`.
+3. Logs: `sudo journalctl -u kibana -n 50`
+4. Firewall
 
-#### Problème : Page Kibana reste en chargement (loading)
+#### Problem: Kibana stays on the loading page
 
-**Symptômes** : La page Kibana s'affiche mais reste bloquée sur "Loading..." ou "Kibana is starting", même après plusieurs minutes.
+**Symptoms**: the page opens but stays on "Loading..." or "Kibana is starting", even after several minutes.
 
-**Causes possibles** :
-1. Les migrations d'objets sauvegardés sont en cours (normal au premier démarrage)
-2. Kibana attend que les migrations se terminent avant d'afficher l'interface
-3. Problème de performance (manque de mémoire)
+**Possible causes**:
+1. Saved-object migrations are still running (normal on the first start)
+2. Kibana waits for those migrations before showing the UI
+3. The VM is short on memory
 
-**Solutions** :
+**What to try**:
 
-1. **Vérifiez l'état des migrations dans les logs** — filtrez le journal Kibana sur les messages de migration :
+1. **Watch migrations in the logs** — keep only migration lines from the Kibana journal:
 
    ```bash
    sudo journalctl -u kibana -f | grep -i "migration\|savedobjects"
    ```
 
-   `| grep -i "..."` : ne garde que les lignes contenant ces mots (insensible à la casse). Vous devriez voir des messages comme "Starting saved objects migrations" puis "Migration completed" ou "Migration successful".
+   `| grep -i "..."` keeps lines that contain those words, ignoring case. You should see "Starting saved objects migrations", then "Migration completed" or "Migration successful".
 
-2. **Attendez 3-5 minutes** lors du premier démarrage. Les migrations peuvent prendre du temps, surtout avec peu de RAM.
+2. **Wait 3–5 minutes** on the first start. Migrations are slow when RAM is tight.
 
-3. **Vérifiez que Kibana est bien connecté à Elasticsearch** :
+3. **Confirm Kibana reached Elasticsearch**:
 
    ```bash
    sudo journalctl -u kibana | grep -i "connected to elasticsearch"
    ```
 
-   Vous devriez voir "Successfully connected to Elasticsearch".
+   You should see "Successfully connected to Elasticsearch".
 
-4. **Vérifiez l'état du service Kibana** :
+4. **Check the Kibana service**:
 
    ```bash
    sudo systemctl status kibana
    ```
 
-   Le service doit être "active (running)".
+   It must be "active (running)".
 
-5. **Vérifiez les logs complets pour des erreurs** — les 200 dernières lignes, sans pager :
+5. **Read the full recent log** — last 200 lines, no pager:
 
    ```bash
    sudo journalctl -u kibana -n 200 --no-pager
    ```
 
-   Cherchez les erreurs (ERROR, FATAL) ou les warnings importants.
+   Look for ERROR, FATAL, or serious warnings.
 
-6. **Si les migrations semblent bloquées** (plus de 10 minutes), vous pouvez essayer de les réinitialiser (⚠️ **ATTENTION** : cela supprimera toutes les configurations Kibana) :
+6. **If migrations look stuck** (more than 10 minutes), you can reset them. **Warning**: this deletes every Kibana configuration.
 
    ```bash
-   # Arrêtez Kibana
+   # Stop Kibana
    sudo systemctl stop kibana
-   
-   # Supprimez les index Kibana (perte de toutes les configurations, visualisations, dashboards)
+
+   # Delete Kibana indexes (all visualisations, dashboards and saved objects are lost)
    curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt -X DELETE "https://localhost:9200/.kibana*"
-   
-   # Redémarrez Kibana
+
+   # Start Kibana
    sudo systemctl start kibana
-   
-   # Attendez 3-5 minutes pour les nouvelles migrations
+
+   # Wait 3–5 minutes for the new migrations
    ```
 
-   `.kibana*` : index internes de Kibana (objets sauvegardés). Ne faites ceci qu’en dernier recours en labo.
+   `.kibana*`: Kibana's internal indexes (saved objects). Do this only as a last resort in the lab.
 
-7. **Vérifiez la mémoire disponible** :
+7. **Check free memory**:
 
    ```bash
    free -h
    ```
 
-   Si la mémoire est saturée, les migrations peuvent être très lentes. Considérez réduire le heap d'Elasticsearch.
+   If memory is full, migrations are very slow. Consider lowering the Elasticsearch heap.
 
-**Note** : Si vous voyez dans les logs "Starting saved objects migrations" mais pas de message de fin, c'est normal - les migrations peuvent prendre plusieurs minutes. Patientez et surveillez les logs.
+**Note**: "Starting saved objects migrations" with no completion line yet is normal. Migrations can take several minutes. Wait, and keep an eye on the logs.
 
-#### Problème : `filebeat test output` échoue (TLS / HTTPS)
+#### Problem: `filebeat test output` fails (TLS / HTTPS)
 
-**Symptômes** : `connection... ERROR`, `x509: …`, ou tentative en HTTP alors qu’ES écoute en HTTPS.
+**Symptoms**: `connection... ERROR`, `x509: …`, or plain HTTP while ES expects HTTPS.
 
-**Causes fréquentes** (YAML **paquet par défaut**) :
-1. `hosts` encore à `localhost:9200` sans `https://`, et `#protocol: "https"` toujours commenté
-2. `#username` / `#password` encore commentés, ou compte `elastic` au lieu de `beats_writer`
-3. Bloc `ssl:` / CA manquant sous `output.elasticsearch` (les lignes `#ssl.certificate_authorities` du fichier stock sont sous **Logstash**, pas sous Elasticsearch)
-4. Fichier CA absent : `/etc/filebeat/certs/http_ca.crt`
+**Common causes** (**default package** YAML):
+1. `hosts` still `localhost:9200` without `https://`, and `#protocol: "https"` still commented
+2. `#username` / `#password` still commented, or using `elastic` instead of `beats_writer`
+3. Missing `ssl:` / CA under `output.elasticsearch` (stock `#ssl.certificate_authorities` lines sit under **Logstash**, not Elasticsearch)
+4. Missing CA file: `/etc/filebeat/certs/http_ca.crt`
 
-**Solutions** : reprendre §3.1 étape 2 ; recopier la CA ; `sudo filebeat test output` jusqu’à `handshake... OK` et `talk to server... OK`.
+**What to try**: redo §3.1 step 2; recopy the CA; run `sudo filebeat test output` until `handshake... OK` and `talk to server... OK`.
 
-#### Problème : Les logs n'apparaissent pas dans Kibana
+#### Problem: logs do not show up in Kibana
 
-**Symptômes** : Aucune donnée dans Discover
+**Symptoms**: Discover is empty.
 
-**Solutions** :
-1. Vérifiez que les Beats fonctionnent : `sudo systemctl status filebeat`
-2. Vérifiez les index dans Elasticsearch : `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_cat/indices?v`
-3. Vérifiez la configuration des Beats
-4. Vérifiez les logs des Beats : `sudo journalctl -u filebeat -f`
+**What to try**:
+1. Beats are running: `sudo systemctl status filebeat`
+2. Indexes exist: `curl -sk -u elastic:$ELASTIC_PASS --cacert /etc/elasticsearch/certs/http_ca.crt https://localhost:9200/_cat/indices?v`
+3. Recheck the Beats configuration
+4. Beats logs: `sudo journalctl -u filebeat -f`
 
-#### Problème : Winlogbeat ne collecte pas d'événements
+#### Problem: Winlogbeat collects nothing
 
-**Symptômes** : Aucun événement Windows dans Kibana
+**Symptoms**: no Windows events in Kibana.
 
-**Solutions** :
-1. Vérifiez le service : `Get-Service winlogbeat`
-2. Vérifiez les logs : `Get-EventLog -LogName Application -Source winlogbeat`
-3. Vérifiez la configuration : `.\winlogbeat.exe test config`
-4. Vérifiez la connectivité vers Elasticsearch : `Test-NetConnection -ComputerName IP_SIEM -Port 9200`
+**What to try**:
+1. Service: `Get-Service winlogbeat`
+2. Logs: `Get-EventLog -LogName Application -Source winlogbeat`
+3. Config: `.\winlogbeat.exe test config`
+4. Path to Elasticsearch: `Test-NetConnection -ComputerName IP_SIEM -Port 9200`
 
-#### Problème : Performance lente avec 2 Go de RAM
+#### Problem: the VM is slow on 2 GB of RAM
 
-**Symptômes** : Système lent, services qui plantent
+**Symptoms**: the system is slow, services crash.
 
-**Solutions** :
-1. Réduisez le heap d'Elasticsearch (par exemple 256 Mo si Kibana et Logstash tournent en même temps)
-2. Limitez le nombre d'indices
-3. Désactivez les fonctionnalités non essentielles (ML, etc.)
-4. Utilisez un swap si nécessaire (mais cela ralentit)
-5. Vérifiez la consommation mémoire des autres services (Kibana, Logstash)
+**What to try**:
+1. Lower the Elasticsearch heap (for example 256 MB if Kibana and Logstash run at the same time)
+2. Limit how many indexes you keep
+3. Turn off features you are not using (machine learning, and so on)
+4. Add swap if you must (it will be slower)
+5. See how much RAM Kibana and Logstash are using
 
-### 6.3 Ressources supplémentaires
+### 6.3 Further reading
 
-#### Documentation officielle
+#### Official documentation
 
-- **Elastic Stack** : https://www.elastic.co/guide/
-- **Elasticsearch** : https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html
-- **Logstash** : https://www.elastic.co/guide/en/logstash/current/index.html
-- **Kibana** : https://www.elastic.co/guide/en/kibana/current/index.html
-- **Beats** : https://www.elastic.co/guide/en/beats/index.html
+- **Elastic Stack**: https://www.elastic.co/guide/
+- **Elasticsearch**: https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html
+- **Logstash**: https://www.elastic.co/guide/en/logstash/current/index.html
+- **Kibana**: https://www.elastic.co/guide/en/kibana/current/index.html
+- **Beats**: https://www.elastic.co/guide/en/beats/index.html
 
-#### Patterns Grok
+#### Grok patterns
 
-- **Grok Debugger** : https://grokdebug.herokuapp.com/
-- **Patterns de base** : https://github.com/elastic/logstash/blob/v1.4.2/patterns/grok-patterns
+- **Grok Debugger**: https://grokdebug.herokuapp.com/
+- **Base patterns**: https://github.com/elastic/logstash/blob/v1.4.2/patterns/grok-patterns
 
-#### Communautés
+#### Communities
 
-- **Forum Elastic** : https://discuss.elastic.co/
-- **Stack Overflow** : Tag `elasticsearch`, `logstash`, `kibana`
+- **Elastic forum**: https://discuss.elastic.co/
+- **Stack Overflow**: tags `elasticsearch`, `logstash`, `kibana`
 
-#### Outils utiles
+#### Extra tools
 
-- **Elasticsearch Head** : Plugin pour visualiser Elasticsearch
-- **Cerebro** : Interface web pour gérer Elasticsearch
-- **Elasticsearch Curator** : Outil pour gérer les index
+- **Elasticsearch Head**: a plugin to browse Elasticsearch
+- **Cerebro**: a web UI to manage Elasticsearch
+- **Elasticsearch Curator**: a tool to manage indexes
 
-### 6.5 Checklist de fin de TP
+### 6.5 End-of-lab checklist
 
-Avant de terminer, vérifiez que vous avez :
+Before you finish, confirm that:
 
-- [ ] Elasticsearch installé et fonctionnel sur la VM SIEM
-- [ ] Kibana accessible (`http://IP_SIEM:5601`) avec login `elastic`
-- [ ] Elasticsearch joignable en HTTPS avec CA + identifiants
-- [ ] Logstash configuré avec au moins un pipeline (test ou beats)
-- [ ] Filebeat sur la VM à surveiller : modules `system`, `apache`, `suricata`
-- [ ] Alertes Suricata visibles (`event.kind: "alert"`)
-- [ ] Traces SSH / auth visibles (`event.dataset: "system.auth"`)
-- [ ] Logs Apache visibles (`event.dataset: "apache.access"`)
-- [ ] Metricbeat collectant les métriques hôte (`metricbeat-*`)
-- [ ] Un dashboard Linux / sécurité que **vous** avez créé (au moins 3 visualisations)
-- [ ] Un dashboard GeoIP que **vous** avez créé : destinations (sortant) et sources (vers la VM)
-- [ ] Winlogbeat installé (même branche que le SIEM), service **Running**, data view `winlogbeat-*`
-- [ ] Un dashboard Windows que **vous** avez créé (4624 / 4625 / canaux)
-- [ ] Configurations et découvertes documentées (y compris l’IP source Windows → SIEM:9200)
+- [ ] Elasticsearch is installed and answering on the SIEM VM
+- [ ] Kibana opens in your browser (`http://IP_SIEM:5601`)
+- [ ] Logstash has at least one pipeline (test or beats)
+- [ ] Filebeat on the monitored VM: modules `system`, `apache`, `suricata`
+- [ ] Suricata alerts are visible (`event.kind: "alert"`)
+- [ ] SSH / auth traces are visible (`event.dataset: "system.auth"`)
+- [ ] Apache logs are visible (`event.dataset: "apache.access"`)
+- [ ] Metricbeat is collecting host metrics (`metricbeat-*`)
+- [ ] A Linux / security dashboard **you** built (at least 3 visualisations)
+- [ ] A GeoIP dashboard **you** built: destination points (outbound) and source points (inbound to the VM)
+- [ ] Winlogbeat is installed (same branch as the SIEM), the service is **Running**, data view `winlogbeat-*` exists
+- [ ] A Windows dashboard **you** built (4624 / 4625 / channels)
+- [ ] Configurations and findings are written down, including the Windows source IP towards SIEM:9200
