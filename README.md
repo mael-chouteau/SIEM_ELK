@@ -59,7 +59,7 @@ Le labo ESAIP utilise **deux VMs Linux** plus un **poste Windows** (navigateur K
 #### VM à surveiller (Linux)
 - **Rôle** : sources de logs / métriques envoyées vers le SIEM
 - **OS** : Debian 13 — **~2 Go RAM**, **2 vCPU**
-- **Services cibles** : Suricata (alertes), SSH (`auth.log`), Apache, Metricbeat
+- **Services cibles** : Suricata (alertes), SSH (journald), Apache, Metricbeat
 - **Agents** : Filebeat + Metricbeat → `https://IP_SIEM:9200` (TLS + utilisateur `beats_writer`)
 
 #### Poste Windows
@@ -76,7 +76,7 @@ Le labo ESAIP utilise **deux VMs Linux** plus un **poste Windows** (navigateur K
 │                  │         │                      │
 │  - Suricata      │──logs──▶│  - Elasticsearch     │
 │  - Apache        │  Beats  │  - Kibana :5601      │
-│  - SSH/rsyslog   │────────▶│  - Logstash (opt.)   │
+│  - SSH/journald  │────────▶│  - Logstash (opt.)   │
 │  - Filebeat      │         │                      │
 │  - Metricbeat    │         │                      │
 └──────────────────┘         └──────────▲───────────┘
@@ -809,18 +809,11 @@ Documentation officielle : [grok](https://www.elastic.co/guide/en/logstash/curre
 
 ### 3.1 Installation et configuration de Filebeat
 
-#### Étape 1 : Installation de Filebeat et rsyslog
+#### Étape 1 : Installation de Filebeat
 
-Depuis Debian 8, journald est utilisé pour logger les événements système ; sans rsyslog, Filebeat ne trouve pas `/var/log/auth.log` / `/var/log/syslog` aux chemins classiques.
+Debian 13 enregistre l’authentification et le syslog dans **journald** (`journalctl`). Le module `system` de Filebeat lit ce journal directement (`var.use_journald`). rsyslog n’est pas nécessaire.
 
-Installez rsyslog et démarrez-le immédiatement (`--now` = enable + start) pour écrire les logs classiques sur disque.
-
-```bash
-sudo apt install -y rsyslog
-sudo systemctl enable --now rsyslog
-```
-
-Installez ensuite Filebeat (agent de collecte de fichiers/logs vers Elasticsearch).
+Installez Filebeat (agent de collecte vers Elasticsearch).
 
 ```bash
 sudo apt install -y filebeat
@@ -910,9 +903,22 @@ sudo filebeat modules enable system apache suricata
 - module: system
   syslog:
     enabled: true
+    var.use_journald: true
   auth:
     enabled: true
+    var.use_journald: true
 ```
+
+`var.use_journald: true` : Filebeat lit le journal systemd (facilities auth/authpriv pour `auth`, le reste pour `syslog`) au lieu de `/var/log/auth.log` et `/var/log/syslog`.
+
+Le service du paquet tourne en root et peut lire le journal. S’il tourne sous l’utilisateur `filebeat`, ajoutez-le au groupe qui possède le journal, puis redémarrez :
+
+```bash
+sudo usermod -aG systemd-journal filebeat
+sudo systemctl restart filebeat
+```
+
+Contrôle : `sudo journalctl -u filebeat -n 30` ne doit plus afficher un harvester sur `/var/log/auth.log`. Une erreur `permission denied` sur le journal signifie que le compte du service n’est pas dans `systemd-journal`.
 
 **Apache** — `/etc/filebeat/modules.d/apache.yml` :
 
@@ -951,7 +957,7 @@ sudo systemctl enable --now apache2
 Écrivez une règle de labo dans le répertoire des règles Debian : `tee` crée le fichier avec le contenu entre `EOF` (heredoc).
 
 ```bash
-sudo tee /etc/suricata/rules/lab-test.rules <<'EOF'
+sudo tee /var/lib/suricata/rules/lab-test.rules <<'EOF'
 # Règle de labo défensive — alerte sur requête HTTP vers /esaip-lab-test
 alert http any any -> $HOME_NET any (msg:"ESAIP-LAB-HTTP-TEST"; http.uri; content:"/esaip-lab-test"; sid:9000001; rev:1;)
 EOF
@@ -974,7 +980,7 @@ sudo systemctl enable --now suricata
 sudo systemctl status suricata
 ```
 
-Les alertes sont dans `/var/log/suricata/eve.json`. Les règles gérées par `suricata-update` vivent sous `/etc/suricata/rules`.
+Les alertes sont dans `/var/log/suricata/eve.json`. Les règles gérées par `suricata-update` vivent sous `/var/lib/suricata/rules`.
 
 **Générer une alerte qui traverse vraiment eth0** : un `curl` vers `localhost` sur la VM surveillée ne produit **pas** de trafic sur `eth0`. Lancez le stimulus **depuis une autre machine du labo** (ex. le SIEM) :
 
@@ -1485,7 +1491,7 @@ Vérifiez d’abord qu’aucune règle ne va jeter ces paquets :
 - `rule-files` ne charge que des règles `alert` (pas de `drop` / `reject` actif).
 - UFW est inactif et la politique iptables est `ACCEPT`.
 
-Ajoutez une alerte de labo, pas un blocage. Fichier `/etc/suricata/rules/lab-geo.rules` :
+Ajoutez une alerte de labo, pas un blocage. Fichier `/var/lib/suricata/rules/lab-geo.rules` :
 
 ```
 alert tcp !$HOME_NET any -> $HOME_NET 22 (msg:"ESAIP-LAB-SSH-PROBE"; flags:S; sid:9000002; rev:1;)
@@ -1963,5 +1969,3 @@ Avant de terminer, vérifiez que vous avez :
 - [ ] Winlogbeat installé (même branche que le SIEM), service **Running**, data view `winlogbeat-*`
 - [ ] Un dashboard Windows que **vous** avez créé (4624 / 4625 / canaux)
 - [ ] Configurations et découvertes documentées (y compris l’IP source Windows → SIEM:9200)
-*TP créé pour l'UE S10-3 - Sécurité des informations et management des événements*  
-*École ESAIP - Ingénieur Informatique et Réseaux*
