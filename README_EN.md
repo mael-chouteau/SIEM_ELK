@@ -969,7 +969,7 @@ sudo systemctl enable --now apache2
 Write a lab rule into Debian's rules directory. `tee` creates the file from the text between `EOF` (a heredoc).
 
 ```bash
-sudo tee /var/lib/suricata/rules/lab-test.rules <<'EOF'
+sudo tee /etc/suricata/rules/lab-test.rules <<'EOF'
 # Defensive lab rule — alert on HTTP requests to /esaip-lab-test
 alert http any any -> $HOME_NET any (msg:"ESAIP-LAB-HTTP-TEST"; http.uri; content:"/esaip-lab-test"; sid:9000001; rev:1;)
 EOF
@@ -992,7 +992,7 @@ sudo systemctl enable --now suricata
 sudo systemctl status suricata
 ```
 
-Alerts are in `/var/log/suricata/eve.json`. Rules managed by `suricata-update` live under `/var/lib/suricata/rules`.
+Alerts are in `/var/log/suricata/eve.json`. Rules managed by `suricata-update` live under `/etc/suricata/rules`.
 
 **Raise an alert that really crosses eth0**. A `curl` to `localhost` on the monitored VM does **not** produce traffic on `eth0`. Send the request **from another lab machine** (for example the SIEM):
 
@@ -1502,7 +1502,7 @@ Check first that nothing will drop these packets:
 - `rule-files` loads only `alert` rules (no active `drop` / `reject`).
 - UFW is inactive and the iptables policy is `ACCEPT`.
 
-Add a lab alert, not a block. File `/var/lib/suricata/rules/lab-geo.rules`:
+Add a lab alert, not a block. File `/etc/suricata/rules/lab-geo.rules`:
 
 ```
 alert tcp !$HOME_NET any -> $HOME_NET 22 (msg:"ESAIP-LAB-SSH-PROBE"; flags:S; sid:9000002; rev:1;)
